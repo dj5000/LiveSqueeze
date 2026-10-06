@@ -75,14 +75,45 @@ envelope state is kept in `double`. Output is independent of the block size.
 
 ## Latency
 
-Added latency is roughly the capture period + a small safety margin + the playback period + the limiter look-ahead.
-The engine reports the figure it computed. Three modes will trade latency against robustness (Low, Balanced, Safe).
+LiveSqueeze adds three things to the path: the queue between the capture and playback devices, the resampler's look-ahead
+(0.5 ms) and the limiter's look-ahead (5.3 ms). The queue is sized from the device callback sizes and a safety margin
+chosen by the latency mode:
+
+| Mode | Safety margin | Added by LiveSqueeze (480-frame callbacks at 48 kHz) |
+|---|---|---|
+| Low | 2 ms | about 23 ms |
+| Balanced (default) | 5 ms | about 26 ms |
+| Safe | 12 ms | about 33 ms |
+
+These are the engine's own delay, measured in simulation. The devices add their own buffering on top (typically
+10–40 ms), which only real hardware can show; `lsq-run --selftest` reports the periods each device agreed to.
 
 ## Clock drift
 
-Capture and playback devices run on separate clocks on Windows and macOS. The engine keeps the ring buffer near a target
-fill level with a small PI controller that nudges the resampling ratio by at most ±500 ppm, so no audio is dropped or
-repeated in normal operation.
+Capture and playback devices run on separate clocks on Windows and macOS. The engine keeps the queue near a target fill
+level with a small PI controller that nudges the resampling ratio by at most ±2000 ppm (0.2%, about 3.5 cents), so no
+audio is dropped or repeated in normal operation.
+
+Two details matter in practice, and both were found by simulation:
+
+- **The target must cover the whole worst case.** Audio arrives in capture-sized chunks and leaves in playback-sized
+  chunks, so the fill seen at each playback callback swings by about a block, plus callback jitter. The queue therefore
+  holds one playback block, the resampler's look-ahead, half a capture block and the jitter margin.
+- **The fill must be measured "fluidly".** Because the two clocks differ slightly, the order of the capture and playback
+  callbacks slowly changes (once per ~100 s at 100 ppm), and the raw ring fill jumps by a whole capture block each time.
+  A controller fed that signal hunts. The engine adds the audio the capture device has accumulated since its last
+  callback (time since the last capture callback × rate), which removes the jump. With this, a 100 ppm offset gives a
+  trim within noise of 100 ppm and a fill within 0.1 ms of target.
+
+Underruns fade out over about 2 ms, then wait for the queue to refill and fade back in over 10 ms. A queue that
+overfills (a long stall on the playback side) is trimmed back to target.
+
+## Device management
+
+The supervisor owns the backend and the engine on a worker thread. It opens the devices, and restarts them with
+exponential backoff (250 ms up to 5 s) when a device disappears, changes format or when playback callbacks stop for 1.5 s.
+It lists devices every 2 s to notice plugging and unplugging. It refuses feedback loops: the output may not be a virtual
+cable, and the input may not be a "Monitor of" the output.
 
 ## Milestones
 
@@ -90,7 +121,7 @@ repeated in normal operation.
 |---|---|
 | M0 | Build system, CI, scaffolding |
 | M1 | DSP core, offline CLI, unit tests |
-| M2 | Engine, backend interface, miniaudio backend, headless runner |
+| M2 | Engine, supervisor, backend interface, miniaudio backend, headless runner |
 | M3 | Linux PipeWire virtual-sink backend |
 | M4 | Qt tray GUI |
 | M5 | Windows backend and documentation |

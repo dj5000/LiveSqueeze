@@ -112,34 +112,13 @@ void Downmixer::process(const float* in, float* out, std::size_t frames, const P
         initialized_ = true;
     }
 
-    bool ramping = false;
     for (int c = 0; c < n; ++c) {
         left_[c].setTarget(tl[c], rampSamples_);
         right_[c].setTarget(tr[c], rampSamples_);
-        ramping = ramping || left_[c].active() || right_[c].active();
     }
 
-    if (!ramping) {
-        float cl[kMaxChannels];
-        float cr[kMaxChannels];
-        for (int c = 0; c < n; ++c) {
-            cl[c] = left_[c].current();
-            cr[c] = right_[c].current();
-        }
-        for (std::size_t f = 0; f < frames; ++f) {
-            const float* x = in + f * static_cast<std::size_t>(n);
-            float l = 0.0f;
-            float r = 0.0f;
-            for (int c = 0; c < n; ++c) {
-                l += cl[c] * x[c];
-                r += cr[c] * x[c];
-            }
-            out[2 * f] = l;
-            out[2 * f + 1] = r;
-        }
-        return;
-    }
-
+    // One loop for every case, so the arithmetic (and therefore every output bit) is the same no
+    // matter how the audio is split into blocks. Ramp::next() just returns the target when idle.
     for (std::size_t f = 0; f < frames; ++f) {
         const float* x = in + f * static_cast<std::size_t>(n);
         float l = 0.0f;

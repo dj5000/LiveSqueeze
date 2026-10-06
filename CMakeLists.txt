@@ -30,10 +30,16 @@ include(LsqWarnings)
 include(LsqSanitizers)
 
 add_subdirectory(core)
+add_subdirectory(backends)
+add_subdirectory(engine)
 
 if(LSQ_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(LSQ_BUILD_RUN)
+  add_subdirectory(apps/run)
 endif()
 
 if(LSQ_BUILD_CLI AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cli/CMakeLists.txt")

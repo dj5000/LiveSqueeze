@@ -6,8 +6,9 @@ It takes the audio your system is playing, converts multichannel sound (for exam
 dynamic range compression so loud passages are turned down and quiet ones (whispers, distant dialogue) are lifted and
 easier to hear, then limits the peaks and plays the result on your real speakers or headphones.
 
-> **Status:** early development. The design and milestones are described in
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). This README is updated as each milestone lands.
+> **Status:** early development. The DSP, the realtime engine and a headless runner exist and are tested; the
+> virtual-device backends and the tray app are being added. Design and milestones:
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## How it works
 
@@ -32,6 +33,19 @@ apps / players ──▶ virtual audio device ──▶ LiveSqueeze ──▶ sp
 
 A custom virtual device of our own on Windows and macOS is a later goal. It needs driver signing on Windows and an
 AudioServerPlugin on macOS, so version 1 uses existing virtual cables there.
+
+## Trying it
+
+The offline tool runs the same DSP on WAV files, so you can hear what the compressor does without any audio setup:
+
+```sh
+build/cli/lsq-cli gen --kind movie --layout 5.1 --seconds 40 --out film.wav   # a made-up film soundtrack
+build/cli/lsq-cli process film.wav squeezed.wav --preset movie-night          # downmix + compress + limit
+build/cli/lsq-cli analyze squeezed.wav
+```
+
+The headless live runner opens real devices (`lsq-run --list-devices`, then `lsq-run --input "CABLE Output"`), and
+`lsq-run --selftest --json` prints a report that is useful in bug reports.
 
 ## Building
 

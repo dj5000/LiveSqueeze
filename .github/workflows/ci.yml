@@ -36,6 +36,17 @@ jobs:
       - name: Cross-check loudness range and true peak with ffmpeg
         if: matrix.compiler == 'gcc'
         run: scripts/xcheck_ffmpeg.sh build/cli/lsq-cli
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build/apps/run/lsq-run --backend null --selftest
+      - name: Upload tools
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-linux
+          path: |
+            build/cli/lsq-cli
+            build/apps/run/lsq-run
+          if-no-files-found: error
 
   sanitizers:
     name: Sanitizers (${{ matrix.name }})
@@ -74,6 +85,16 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build\apps\run\Release\lsq-run.exe --backend null --selftest
+      - name: Upload tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-windows
+          path: |
+            build/cli/Release/lsq-cli.exe
+            build/apps/run/Release/lsq-run.exe
+          if-no-files-found: error
 
   macos:
     name: macOS (arm64)
@@ -86,6 +107,16 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build/apps/run/lsq-run --backend null --selftest
+      - name: Upload tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-macos
+          path: |
+            build/cli/lsq-cli
+            build/apps/run/lsq-run
+          if-no-files-found: error
 
   format:
     name: clang-format

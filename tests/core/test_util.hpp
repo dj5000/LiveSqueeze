@@ -90,6 +90,72 @@ inline bool allFinite(const std::vector<float>& v) {
     return true;
 }
 
+// ---- Sine fit -----------------------------------------------------------------------------
+
+struct SineFit {
+    double amplitude = 0.0;  // fitted peak amplitude
+    double residualDb = 0.0; // residual RMS relative to the fitted sine's RMS (lower is purer)
+};
+
+// Least-squares fit of a sine of known frequency (cycles per sample) plus a DC offset to one
+// channel of an interleaved signal over frames [from, to).
+inline SineFit fitSine(const std::vector<float>& x, int channels, int channel, std::size_t from,
+                       std::size_t to, double freq) {
+    const auto nch = static_cast<std::size_t>(channels);
+    double scc = 0, sss = 0, scs = 0, sc = 0, ss = 0, sxc = 0, sxs = 0, sx = 0;
+    const double n = static_cast<double>(to - from);
+    for (std::size_t i = from; i < to; ++i) {
+        const double w = 2.0 * kPi * freq * static_cast<double>(i);
+        const double c = std::cos(w);
+        const double s = std::sin(w);
+        const double v = static_cast<double>(x[i * nch + static_cast<std::size_t>(channel)]);
+        scc += c * c;
+        sss += s * s;
+        scs += c * s;
+        sc += c;
+        ss += s;
+        sxc += v * c;
+        sxs += v * s;
+        sx += v;
+    }
+    // Solve the 3x3 normal equations [scc scs sc; scs sss ss; sc ss n] * [a b d] = [sxc sxs sx].
+    double m[3][4] = {{scc, scs, sc, sxc}, {scs, sss, ss, sxs}, {sc, ss, n, sx}};
+    for (int col = 0; col < 3; ++col) {
+        int piv = col;
+        for (int r = col + 1; r < 3; ++r) {
+            if (std::fabs(m[r][col]) > std::fabs(m[piv][col])) {
+                piv = r;
+            }
+        }
+        for (int k = 0; k < 4; ++k) {
+            std::swap(m[col][k], m[piv][k]);
+        }
+        for (int r = 0; r < 3; ++r) {
+            if (r != col) {
+                const double f = m[r][col] / m[col][col];
+                for (int k = col; k < 4; ++k) {
+                    m[r][k] -= f * m[col][k];
+                }
+            }
+        }
+    }
+    const double a = m[0][3] / m[0][0];
+    const double b = m[1][3] / m[1][1];
+    const double d = m[2][3] / m[2][2];
+    double res = 0.0;
+    for (std::size_t i = from; i < to; ++i) {
+        const double w = 2.0 * kPi * freq * static_cast<double>(i);
+        const double v = static_cast<double>(x[i * nch + static_cast<std::size_t>(channel)]);
+        const double e = v - (a * std::cos(w) + b * std::sin(w) + d);
+        res += e * e;
+    }
+    SineFit f;
+    f.amplitude = std::sqrt(a * a + b * b);
+    const double fitPower = 0.5 * f.amplitude * f.amplitude;
+    f.residualDb = 10.0 * std::log10(std::max(res / n, 1e-30) / std::max(fitPower, 1e-30));
+    return f;
+}
+
 // ---- True-peak oracle ---------------------------------------------------------------------
 
 inline double besselI0(double x) {
