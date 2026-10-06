@@ -1,0 +1,213 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build ffmpeg clang \
+            libpipewire-0.3-dev libspa-0.2-dev qt6-base-dev qt6-qpa-plugins fonts-dejavu-core
+      - name: Configure
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then export CC=clang CXX=clang++; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLSQ_WERROR=ON \
+            -DLSQ_BACKEND_PIPEWIRE=ON -DLSQ_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Cross-check loudness range and true peak with ffmpeg
+        if: matrix.compiler == 'gcc'
+        run: scripts/xcheck_ffmpeg.sh build/cli/lsq-cli
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build/apps/run/lsq-run --backend null --selftest
+      - name: Upload tools
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-linux
+          path: |
+            build/cli/lsq-cli
+            build/apps/run/lsq-run
+            build/app/livesqueeze
+          if-no-files-found: error
+      - name: Upload screenshots of the window (light/dark, normal/double text size)
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-screenshots
+          path: build/tests/app/screenshots/*.png
+          if-no-files-found: warn
+
+  linux-e2e:
+    name: Linux PipeWire end-to-end
+    runs-on: ubuntu-24.04
+    # Needs a real PipeWire stack and timing that a shared runner may not provide, so it reports
+    # but does not block.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build libpipewire-0.3-dev \
+            libspa-0.2-dev pipewire pipewire-bin wireplumber dbus-x11 python3
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLSQ_BACKEND_PIPEWIRE=ON \
+            -DLSQ_E2E_TESTS=ON
+          cmake --build build
+      - name: Run the end-to-end test (headless PipeWire, no sound card)
+        run: ctest --test-dir build -L e2e --output-on-failure
+
+  sanitizers:
+    name: Sanitizers (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            sanitize: "address;undefined"
+            app: "ON"
+          - name: TSan
+            sanitize: "thread"
+            app: "OFF"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build qt6-base-dev \
+            qt6-qpa-plugins fonts-dejavu-core
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLSQ_WERROR=ON -DLSQ_BACKEND_PIPEWIRE=OFF -DLSQ_BUILD_APP=${{ matrix.app }} \
+            "-DLSQ_SANITIZE=${{ matrix.sanitize }}"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build\apps\run\Release\lsq-run.exe --backend null --selftest
+      - name: Upload tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-windows
+          path: |
+            build/cli/Release/lsq-cli.exe
+            build/apps/run/Release/lsq-run.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Live engine self-test (software-timed null devices, real threads)
+        run: build/apps/run/lsq-run --backend null --selftest
+      - name: Upload tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-tools-macos
+          path: |
+            build/cli/lsq-cli
+            build/apps/run/lsq-run
+          if-no-files-found: error
+
+  # The Qt application on Windows and macOS. Reports, but does not block, until it has been seen to
+  # pass there (it cannot be run on those systems from where it is developed).
+  app-windows:
+    name: Qt app (Windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.6.*"
+          cache: true
+      - name: Configure
+        run: cmake -S . -B build -DLSQ_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure -R lsq_app_tests
+
+  app-macos:
+    name: Qt app (macOS)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.*"
+          cache: true
+      # Prebuilt Qt 6.6 and 6.8 still link the AGL framework, which the macOS 26 SDK on the runner no
+      # longer ships ("ld: framework 'AGL' not found"). Nothing in LiveSqueeze uses it, so an empty
+      # stand-in is enough for the build and the tests. (Whether newer Qt releases still need it has not
+      # been checked.)
+      - name: Provide an empty AGL framework
+        run: |
+          mkdir -p "$RUNNER_TEMP/stub/AGL.framework"
+          echo 'int lsq_agl_stub;' | clang -x c - -dynamiclib \
+            -o "$RUNNER_TEMP/stub/AGL.framework/AGL" -install_name "$RUNNER_TEMP/stub/AGL.framework/AGL"
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLSQ_BUILD_APP=ON \
+            "-DCMAKE_EXE_LINKER_FLAGS=-F$RUNNER_TEMP/stub"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -R lsq_app_tests
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format-18
+      - name: Check formatting
+        run: |
+          git ls-files '*.cpp' '*.hpp' '*.h' ':!:third_party/**' \
+            | xargs -r clang-format-18 --dry-run --Werror

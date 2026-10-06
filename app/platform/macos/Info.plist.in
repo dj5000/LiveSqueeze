@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>LiveSqueeze</string>
+  <key>CFBundleDisplayName</key><string>LiveSqueeze</string>
+  <key>CFBundleIdentifier</key><string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+  <key>CFBundleExecutable</key><string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+  <key>CFBundleVersion</key><string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <!-- macOS asks the user once, with this text, before an app may record audio. LiveSqueeze
+       "records" the virtual cable (BlackHole) that carries the sound to be processed. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>LiveSqueeze reads the sound sent to your virtual audio cable (for example BlackHole) so it can even out the volume, then plays it on your speakers. It does not record or store anything.</string>
+</dict>
+</plist>
