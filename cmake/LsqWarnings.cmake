@@ -1,7 +1,7 @@
 # lsq_set_warnings(<target>): project-wide warning policy.
 function(lsq_set_warnings target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4 /utf8 /permissive- /Zc:__cplusplus /wd4100)
+    target_compile_options(${target} PRIVATE /W4 /utf8 /permissive- /Zc:__cplusplus /wd4100 /wd4324)
     target_compile_definitions(${target} PRIVATE NOMINMAX _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS)
     if(LSQ_WERROR)
       target_compile_options(${target} PRIVATE /WX)

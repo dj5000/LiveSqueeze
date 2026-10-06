@@ -33,6 +33,9 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Cross-check loudness range and true peak with ffmpeg
+        if: matrix.compiler == 'gcc'
+        run: scripts/xcheck_ffmpeg.sh build/cli/lsq-cli
 
   sanitizers:
     name: Sanitizers (${{ matrix.name }})

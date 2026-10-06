@@ -1,4 +1,12 @@
 add_library(lsq_core STATIC
+  src/channel_map.cpp
+  src/compressor.cpp
+  src/downmix.cpp
+  src/dynamics_chain.cpp
+  src/limiter.cpp
+  src/params.cpp
+  src/presets.cpp
+  src/true_peak.cpp
   src/version.cpp
 )
 add_library(lsq::core ALIAS lsq_core)

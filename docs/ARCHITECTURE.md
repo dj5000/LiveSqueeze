@@ -59,9 +59,14 @@ turned down quickly; quiet passages recover slowly.
 A look-ahead limiter. For every sample it computes the gain needed to stay under the ceiling, takes a sliding-window
 minimum over the look-ahead time, applies a release envelope that never rises above that minimum, and smooths the result
 with a box filter of the same length. The audio is delayed so the gain is always in place before the peak arrives, which
-guarantees the ceiling by construction. Peaks are measured on an 8× oversampled copy of the signal (detection only), so
-the ceiling is a true-peak ceiling in dBTP. Like any oversampling meter this slightly underestimates tones very close to
-half the sample rate; the default ceiling of −1 dBTP leaves room for that.
+guarantees the ceiling by construction. Peaks are measured on an 8× oversampled copy of the signal (a 32-tap polyphase
+interpolator, detection only), so the ceiling is a true-peak ceiling in dBTP.
+
+An interpolator of finite length cannot be exact for broadband material, whose reconstructed peaks depend on many distant
+samples. Measured against an independent 16× long-filter oracle in the test suite, the limited output stays within
+about 0.05 dB of the ceiling for tones, square waves and sample-pair worst cases, within about 0.4 dB for heavily
+overdriven low-passed noise, and within about 0.7 dB for full-band white noise driven 12 dB over full scale. The sample
+values themselves never exceed the ceiling. The default ceiling of −1 dBTP leaves room for all of this.
 
 ### Real-time rules
 
