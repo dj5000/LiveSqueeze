@@ -1,0 +1,21 @@
+# Build output
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Generated audio and test artifacts
+*.wav
+!tests/data/*.wav
+*.profraw
+Testing/
