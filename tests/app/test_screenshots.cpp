@@ -133,6 +133,7 @@ TEST_CASE("screenshots: every page in light and dark, at normal and double text 
         Fixture f;
         AppController c(f.options);
         MainWindow w(&c);
+        w.resize(w.preferredSize()); // the test screen is only 800 x 600
         w.show();
         CHECK(QTest::qWaitForWindowExposed(&w));
         lsqtest::waitFor([&] { return c.state() == lsq::SupervisorState::Running; });
@@ -149,7 +150,8 @@ TEST_CASE("screenshots: every page in light and dark, at normal and double text 
                 QStringLiteral(LSQ_SCREENSHOT_DIR "/%1-%2.png")
                     .arg(QString::fromLatin1(kPages[page]), QString::fromLatin1(a.name));
             CHECK(img.save(file));
-            INFO(a.name << " " << kPages[page]);
+            const std::string where = std::string(a.name) + " page " + kPages[page];
+            INFO(where);
             CHECK(looksDrawn(img));
             CHECK(img.width() > 300);
 

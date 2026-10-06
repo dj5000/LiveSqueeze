@@ -11,6 +11,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QScreen>
 #include <QScrollArea>
 #include <QVBoxLayout>
 
@@ -139,9 +140,19 @@ MainWindow::MainWindow(AppController* controller, QWidget* parent)
     updateStatus(lastState_, lastText_);
     refreshStats();
 
-    // A sensible first size: wide enough for the controls at the current text size.
+    // A sensible first size: the Simple page fits without scrolling at the current text size,
+    // unless the screen is too small for that.
+    QSize want = preferredSize();
+    if (const QScreen* s = QGuiApplication::primaryScreen()) {
+        const QSize room = s->availableGeometry().size() * 9 / 10;
+        want = want.boundedTo(room);
+    }
+    resize(want);
+}
+
+QSize MainWindow::preferredSize() const {
     const QFontMetrics fm = fontMetrics();
-    resize(fm.horizontalAdvance(QStringLiteral("M")) * 62, fm.height() * 40);
+    return {fm.horizontalAdvance(QStringLiteral("M")) * 62, fm.height() * 54};
 }
 
 ParamRow* MainWindow::row(const QString& key) const {
@@ -175,17 +186,20 @@ QWidget* MainWindow::buildSimpleTab() {
     strength_->setToolTip(strength_->accessibleDescription());
     strengthValue_ = new QLabel(strengthBox);
     strengthValue_->setAccessibleName(tr("Strength value"));
-    auto* labels = new QHBoxLayout;
-    auto* gentle = new QLabel(tr("Gentle: only stops peaks"), strengthBox);
-    auto* strong = new QLabel(tr("Strong: for late night"), strengthBox);
-    gentle->setWordWrap(true);
-    strong->setWordWrap(true);
-    strong->setAlignment(Qt::AlignRight);
-    labels->addWidget(gentle);
-    labels->addWidget(strong);
+    // Gentle and Strong sit at the ends of the slider; what they mean is one wrapped label below
+    // (a single label in a vertical layout, which every platform sizes correctly).
+    auto* sliderRow = new QHBoxLayout;
+    sliderRow->addWidget(new QLabel(tr("Gentle"), strengthBox));
+    sliderRow->addWidget(strength_, 1);
+    sliderRow->addWidget(new QLabel(tr("Strong"), strengthBox));
+    auto* strengthHelp =
+        new QLabel(tr("Gentle only stops loud peaks. Strong is for late-night listening: quiet "
+                      "sounds are lifted and loud ones pressed down as far as possible."),
+                   strengthBox);
+    strengthHelp->setWordWrap(true);
     sl->addWidget(strengthValue_);
-    sl->addWidget(strength_);
-    sl->addLayout(labels);
+    sl->addLayout(sliderRow);
+    sl->addWidget(strengthHelp);
     grid->addWidget(strengthBox, 0, 0);
 
     // Preset
@@ -248,7 +262,13 @@ QWidget* MainWindow::buildSimpleTab() {
     });
     connect(savePreset_, &QPushButton::clicked, this, &MainWindow::saveUserPreset);
     connect(deletePreset_, &QPushButton::clicked, this, &MainWindow::deleteUserPreset);
-    return page;
+    // In a scroll area like the Advanced page: with large text or a small screen the page scrolls
+    // instead of cutting text off.
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(page);
+    return scroll;
 }
 
 QWidget* MainWindow::buildAdvancedTab() {

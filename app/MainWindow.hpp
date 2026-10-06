@@ -23,6 +23,9 @@ public:
     // With a system tray, closing the window hides it; without one, closing quits.
     void setTrayAvailable(bool available) { trayAvailable_ = available; }
 
+    // The size the window opens at on a large enough screen.
+    QSize preferredSize() const;
+
     // Parts the tests look at.
     QTabWidget* tabs() const { return tabs_; }
     QSlider* strengthSlider() const { return strength_; }
