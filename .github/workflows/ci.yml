@@ -180,7 +180,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jurplel/install-qt-action@v4
         with:
-          version: "6.6.*"
+          # Qt 6.6 links the AGL framework, which the macOS 15 SDK on the runners no longer has.
+          version: "6.8.*"
           cache: true
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLSQ_BUILD_APP=ON
