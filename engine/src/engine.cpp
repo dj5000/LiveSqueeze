@@ -73,7 +73,8 @@ Status Engine::configure(const EngineConfig& cfg) {
     // The drift controller works on the "fluid" fill, which includes audio the capture device has
     // already taken in but not yet delivered: on average that is half a capture block.
     drift_.configure(cfg_.captureRate,
-                     static_cast<double>(target) + 0.5 * static_cast<double>(cfg_.captureBlock));
+                     static_cast<double>(target) + 0.5 * static_cast<double>(cfg_.captureBlock),
+                     cfg_.sharedClock ? static_cast<double>(cfg_.captureBlock) : 0.0);
 
     fadeInFrames_ = std::max(1, static_cast<int>(0.010 * cfg_.playbackRate));
     fadeOutFrames_ = std::max(1, static_cast<int>(0.002 * cfg_.playbackRate));
@@ -99,6 +100,8 @@ void Engine::onCapture(const float* in, std::uint32_t frames) noexcept {
     }
     captureCallbacks_.fetch_add(1, std::memory_order_relaxed);
     lastCaptureTime_.store(now(), std::memory_order_relaxed);
+    tracePeak(trace(0, frames, ring_.available(), 0.0), in,
+              static_cast<std::size_t>(frames) * cfg_.captureMap.n);
     if (frames > captureBlockSeen_.load(std::memory_order_relaxed)) {
         captureBlockSeen_.store(frames, std::memory_order_relaxed);
     }
@@ -138,6 +141,8 @@ void Engine::playbackChunk(float* out, std::size_t frames) noexcept {
     const double dt = static_cast<double>(frames) / cfg_.playbackRate;
     std::size_t fill = ring_.available();
     fillFrames_.store(static_cast<double>(fill), std::memory_order_relaxed);
+    const std::size_t traceSlot = trace(1, static_cast<std::uint32_t>(frames), fill,
+                                        trimPpm_.load(std::memory_order_relaxed));
 
     // Devices do not always use the callback sizes they advertise (a PipeWire graph may run a
     // larger quantum than requested, for instance). If larger blocks than planned for show up,
@@ -149,7 +154,8 @@ void Engine::playbackChunk(float* out, std::size_t frames) noexcept {
         targetFill_.store(wanted, std::memory_order_relaxed);
         overfill_ = 3 * wanted + captureSeen;
         drift_.configure(cfg_.captureRate,
-                         static_cast<double>(wanted) + 0.5 * static_cast<double>(captureSeen));
+                         static_cast<double>(wanted) + 0.5 * static_cast<double>(captureSeen),
+                         cfg_.sharedClock ? static_cast<double>(captureSeen) : 0.0);
         adaptations_.fetch_add(1, std::memory_order_relaxed);
         if (running_) {
             // Re-prime: let the queue fill to the new target before continuing.
@@ -161,13 +167,23 @@ void Engine::playbackChunk(float* out, std::size_t frames) noexcept {
 
     // Fluid fill: what is queued in the ring plus what the capture device has accumulated since it
     // last called us. Unlike the ring fill, it does not jump by a whole capture block whenever the
-    // two devices' callbacks change order, which they do slowly because their clocks differ. It is
-    // what the drift controller regulates, so start-up and trimming use it as well: starting
-    // exactly on target avoids a half-block error that would take seconds to correct, during
-    // which the queue is too thin and underruns.
-    const double sinceCapture = now() - lastCaptureTime_.load(std::memory_order_relaxed);
-    const double hidden =
-        std::clamp(sinceCapture * cfg_.captureRate, 0.0, 2.0 * static_cast<double>(captureSeen));
+    // two independent devices' callbacks change order, which they do slowly because their clocks
+    // differ. It is what the drift controller regulates, so start-up and trimming use it as well:
+    // starting exactly on target avoids a half-block error that would take seconds to correct,
+    // during which the queue is too thin and underruns.
+    //
+    // When both streams run off one clock (PipeWire) there is no such beat, and the time at which
+    // each callback runs within the shared cycle is arbitrary: using it would only add noise. The
+    // plain ring fill is then used. The one thing it does not tell is the order of the two
+    // callbacks within a cycle (it depends on which of them has to wait for other nodes of the
+    // graph, and can change at any time): playback first means the fill seen is one capture block
+    // lower. The drift controller therefore has a dead band of one capture block in this mode.
+    double hidden = 0.0;
+    if (!cfg_.sharedClock) {
+        const double sinceCapture = now() - lastCaptureTime_.load(std::memory_order_relaxed);
+        hidden = std::clamp(sinceCapture * cfg_.captureRate, 0.0,
+                            2.0 * static_cast<double>(captureSeen));
+    }
     const double fluidTarget =
         static_cast<double>(targetFill) + 0.5 * static_cast<double>(captureSeen);
     auto skipExcess = [&] {
@@ -239,6 +255,16 @@ void Engine::playbackChunk(float* out, std::size_t frames) noexcept {
     }
 
     chain_.process(out, frames, params_);
+    tracePeak(traceSlot, out, 2 * frames);
+}
+
+void Engine::enableTrace(std::size_t capacity) {
+    trace_.assign(capacity, TraceEvent{});
+    traceNext_.store(0, std::memory_order_relaxed);
+}
+
+std::size_t Engine::traceSize() const noexcept {
+    return std::min(traceNext_.load(std::memory_order_relaxed), trace_.size());
 }
 
 EngineStats Engine::stats() const noexcept {

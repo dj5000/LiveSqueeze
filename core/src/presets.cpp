@@ -99,6 +99,26 @@ Params presetParams(Preset preset) noexcept {
     return p;
 }
 
+Params strengthParams(float percent) noexcept {
+    percent = std::clamp(percent, 0.0f, 100.0f);
+    const Params mid = presetParams(Preset::MovieNight);
+    if (percent <= 0.0f) {
+        return presetParams(Preset::LimiterOnly);
+    }
+    if (percent >= 50.0f) {
+        return blendParams(mid, presetParams(Preset::LateNight), (percent - 50.0f) / 50.0f);
+    }
+    const float t = percent / 50.0f;
+    Params p = mid;
+    p.ratio = 1.0f + (mid.ratio - 1.0f) * t;
+    p.upRatio = 1.0f + (mid.upRatio - 1.0f) * t;
+    p.maxBoostDb = mid.maxBoostDb * t;
+    p.makeupDb = mid.makeupDb * t;
+    p.centerGainDb = mid.centerGainDb * t;
+    sanitize(p);
+    return p;
+}
+
 Params blendParams(const Params& a, const Params& b, float t) noexcept {
     t = std::clamp(t, 0.0f, 1.0f);
     Params out = a;

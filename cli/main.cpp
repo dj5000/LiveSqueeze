@@ -4,6 +4,8 @@
 //   lsq-cli analyze  peaks, true peaks and levels of a WAV file
 //   lsq-cli process  downmix + compress + limit a WAV file
 //   lsq-cli curve    print the static compression curve as CSV
+//   lsq-cli compare  check that a recording of live output matches the offline result
+//   lsq-cli tones-check  check the channel mapping of a recorded "tones" signal
 //   lsq-cli bench    measure how much faster than real time the DSP runs
 //   lsq-cli presets  list the presets
 //   lsq-cli params   list every adjustable parameter
@@ -17,6 +19,7 @@
 #include <vector>
 
 #include "analyze.hpp"
+#include "checks.hpp"
 #include "lsq/downmix.hpp"
 #include "lsq/dynamics_chain.hpp"
 #include "lsq/gain_computer.hpp"
@@ -39,6 +42,8 @@ struct Args {
     double from = -90.0;
     double to = 0.0;
     double step = 1.0;
+    double window = 0.5;
+    double maxDiff = -1.0;
     bool compensate = true;
     bool help = false;
 };
@@ -88,6 +93,10 @@ Args parseArgs(int argc, char** argv, int first) {
             a.to = number(i);
         else if (s == "--step")
             a.step = number(i);
+        else if (s == "--window")
+            a.window = number(i);
+        else if (s == "--max-diff")
+            a.maxDiff = number(i);
         else if (s == "--no-compensate")
             a.compensate = false;
         else if (s == "-h" || s == "--help")
@@ -128,6 +137,8 @@ void usage() {
         "  lsq-cli process in.wav out.wav [--preset movie-night] [--set key=value]... [--layout "
         "5.1]\n"
         "                                 [--no-compensate]\n"
+        "  lsq-cli compare reference.wav recording.wav [--window 0.5] [--max-diff 1.0]\n"
+        "  lsq-cli tones-check recording.wav --layout 5.1 [--max-diff 0.3]\n"
         "  lsq-cli curve [--preset name] [--set key=value]... [--from -90 --to 0 --step 1]\n"
         "  lsq-cli bench [--layout 7.1] [--seconds 60] [--rate 48000] [--preset name]\n"
         "  lsq-cli presets\n"
@@ -242,6 +253,42 @@ int cmdProcess(const Args& a) {
     return 0;
 }
 
+int cmdCompare(const Args& a) {
+    if (a.positional.size() != 2) {
+        die("compare needs a reference WAV and a recording WAV");
+    }
+    lsqcli::Audio ref;
+    lsqcli::Audio test;
+    std::string err;
+    if (!lsqcli::readWav(a.positional[0], ref, err) ||
+        !lsqcli::readWav(a.positional[1], test, err)) {
+        die(err);
+    }
+    const lsqcli::CompareResult r =
+        lsqcli::compareLevels(ref, test, a.window, a.maxDiff > 0.0 ? a.maxDiff : 1.0);
+    std::fputs(r.report.c_str(), stdout);
+    return r.ok ? 0 : 1;
+}
+
+int cmdTonesCheck(const Args& a) {
+    if (a.positional.size() != 1) {
+        die("tones-check needs one recorded WAV file");
+    }
+    lsq::ChannelMap layout = lsq::ChannelMap::standard(lsq::Layout::Surround51);
+    if (!a.layout.empty() && !lsq::ChannelMap::parse(a.layout, layout)) {
+        die("unknown layout '" + a.layout + "'");
+    }
+    lsqcli::Audio rec;
+    std::string err;
+    if (!lsqcli::readWav(a.positional[0], rec, err)) {
+        die(err);
+    }
+    const lsqcli::CompareResult r =
+        lsqcli::checkTones(layout, rec, a.maxDiff > 0.0 ? a.maxDiff : 0.3);
+    std::fputs(r.report.c_str(), stdout);
+    return r.ok ? 0 : 1;
+}
+
 int cmdCurve(const Args& a) {
     const lsq::Params p = buildParams(a);
     if (a.step <= 0.0) {
@@ -350,6 +397,10 @@ int main(int argc, char** argv) {
         return cmdAnalyze(a);
     if (cmd == "process")
         return cmdProcess(a);
+    if (cmd == "compare")
+        return cmdCompare(a);
+    if (cmd == "tones-check")
+        return cmdTonesCheck(a);
     if (cmd == "curve")
         return cmdCurve(a);
     if (cmd == "bench")

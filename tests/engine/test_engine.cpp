@@ -85,6 +85,7 @@ struct Rig {
         ec.captureBlock = info.capturePeriodFrames;
         ec.playbackBlock = info.playbackPeriodFrames;
         ec.latency = mode;
+        ec.sharedClock = info.sharedClock;
         REQUIRE(engine.configure(ec).ok);
         store.publish(presetParams(preset));
     }
@@ -322,4 +323,81 @@ TEST_CASE("larger callbacks than advertised enlarge the queue instead of underru
     CHECK(s.underruns <= 3);            // while it found out, never afterwards
     CHECK(rig.probe.silentFrames == 0); // nothing after the first four seconds is lost
     CHECK(rig.probe.maxStep <= kNaturalStep * 1.05);
+}
+
+TEST_CASE("shared clock: callbacks that wander within the cycle must not disturb the queue") {
+    // Both streams in one cycle, as in PipeWire. The whole cycle is late by up to 10 ms (almost a
+    // full period) at random, so the moment each callback runs is meaningless as a measure of
+    // when data arrived. The plain ring fill is steady; the engine must regulate on that.
+    FakeConfig cfg;
+    cfg.sharedCycle = true;
+    cfg.jitterMs = 10.0;          // the whole cycle is late by up to 10 ms
+    cfg.intraCycleWanderMs = 9.0; // and the gap between the two callbacks wanders by up to 9 ms
+    cfg.seed = 9;
+    Rig rig(cfg);
+    REQUIRE(rig.info.sharedClock);
+    rig.probe.skipFrames = 48000 * 5;
+
+    double worstTrim = 0.0;
+    for (int i = 0; i < 60; ++i) {
+        rig.fake->advance(1.0);
+        if (i >= 10) {
+            worstTrim = std::max(worstTrim, std::fabs(rig.engine.stats().trimPpm));
+        }
+    }
+    const EngineStats s = rig.engine.stats();
+    std::printf("    [engine] shared clock, cycle jitter 10 ms: worst trim after 10 s %.1f ppm, "
+                "fill %.2f ms (target %.2f), underruns %llu\n",
+                worstTrim, s.fillMs, s.targetFillMs, static_cast<unsigned long long>(s.underruns));
+    CHECK(s.underruns == 0);
+    CHECK(s.overruns == 0);
+    CHECK(s.primes == 1);
+    CHECK(worstTrim < 150.0); // no hunting: a shared clock needs (almost) no correction
+    CHECK(rig.probe.silentFrames == 0);
+    CHECK(rig.probe.maxStep <= kNaturalStep * 1.05);
+}
+
+TEST_CASE("shared clock: the order of the two callbacks may change without disturbing playback") {
+    // In a PipeWire graph the capture node and the playback node are not ordered against each
+    // other: which one runs first in a cycle depends on what else the graph is waiting for. When
+    // the order flips, the fill seen at the start of the playback callback drops by one capture
+    // block. Nothing is wrong with the queue, so nothing may be corrected: no hunting, no pitch
+    // shift, no extra delay.
+    FakeConfig cfg;
+    cfg.sharedCycle = true;
+    cfg.jitterMs = 3.0;
+    cfg.playbackFirstAfter = 20.0;
+    cfg.seed = 5;
+    Rig rig(cfg);
+    rig.probe.skipFrames = 48000 * 5;
+
+    rig.fake->advance(19.0);
+    const double fillBefore = rig.engine.stats().fillMs;
+    double worstTrim = 0.0;
+    for (int i = 0; i < 40; ++i) {
+        rig.fake->advance(1.0);
+        worstTrim = std::max(worstTrim, std::fabs(rig.engine.stats().trimPpm));
+    }
+    const EngineStats s = rig.engine.stats();
+    std::printf("    [engine] callback order flipped at 20 s: worst trim %.1f ppm, fill %.2f ms "
+                "before, %.2f ms after (target %.2f), underruns %llu\n",
+                worstTrim, fillBefore, s.fillMs, s.targetFillMs,
+                static_cast<unsigned long long>(s.underruns));
+    CHECK(s.underruns == 0);
+    CHECK(s.primes == 1);
+    CHECK(worstTrim < 150.0);
+    CHECK(s.fillMs > 0.0);
+    CHECK(rig.probe.silentFrames == 0);
+    CHECK(rig.probe.maxStep <= kNaturalStep * 1.05);
+}
+
+TEST_CASE("shared clock: a stable queue is held on target") {
+    FakeConfig cfg;
+    cfg.sharedCycle = true;
+    Rig rig(cfg);
+    rig.fake->advance(30.0);
+    const EngineStats s = rig.engine.stats();
+    CHECK_NEAR(s.fillMs, s.targetFillMs, 1.5);
+    CHECK(std::fabs(s.trimPpm) < 50.0);
+    CHECK(s.underruns == 0);
 }

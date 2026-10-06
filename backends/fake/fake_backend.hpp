@@ -21,6 +21,17 @@ struct FakeConfig {
     double playbackClockPpm = 0.0; // > 0: the playback device's clock runs fast
     double jitterMs = 0.0;         // each callback is delayed by up to this much, at random
     std::uint64_t seed = 1;
+    // Both streams run in one cycle off a single clock: each tick calls the capture callback and
+    // then the playback callback back to back (like two PipeWire streams in one graph). The
+    // periods must match. Jitter then delays the whole cycle.
+    bool sharedCycle = false;
+    // In shared-cycle mode the playback callback runs this long (at most) after the capture one,
+    // and the gap wanders over seconds, as it does when the data thread is scheduled unevenly.
+    double intraCycleWanderMs = 0.0;
+    // In shared-cycle mode, from this time on (seconds) the playback callback runs before the
+    // capture one in every cycle, as when the order of the two nodes in the graph changes.
+    // Negative: never.
+    double playbackFirstAfter = -1.0;
     bool failOpen = false;                // open() fails, to exercise error handling
     bool captureMonitorsPlayback = false; // the capture device is "Monitor of Fake speakers"
     bool playbackLooksVirtual = false;    // the playback device is listed as a virtual cable
@@ -80,6 +91,7 @@ private:
 
     void runUntil(double target);
     double lateness();
+    double intraCycleGap();
     void reschedule(Stream& s);
     void runCaptureCallback();
     void runPlaybackCallback();
@@ -94,11 +106,14 @@ private:
     Stream cap_;
     Stream play_;
     std::uint64_t rng_ = 1;
+    double gapBase_ = 0.0;     // slowly changing part of the intra-cycle gap, seconds
+    double gapChangeAt_ = 0.0; // virtual time of the next change
     std::vector<float> captureBuf_;
     std::vector<float> playbackBuf_;
     std::atomic<std::uint64_t> captureFrames_{0};
     std::atomic<std::uint64_t> playbackFrames_{0};
 
+    std::mutex lifecycleMu_; // serializes start()/stop() so a second stop() waits for the first
     std::thread thread_;
     std::atomic<bool> threadRun_{false};
     std::mutex mutex_; // serializes advance() between the thread and injectEvent()/stall calls

@@ -19,7 +19,7 @@ public:
     ScopedFtz() noexcept {
 #if defined(LSQ_HAVE_MXCSR)
         saved_ = _mm_getcsr();
-        _mm_setcsr(saved_ | 0x8040u); // FTZ (bit 15) | DAZ (bit 6)
+        _mm_setcsr(static_cast<unsigned int>(saved_) | 0x8040u); // FTZ (bit 15) | DAZ (bit 6)
 #elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
         std::uint64_t fpcr;
         asm volatile("mrs %0, fpcr" : "=r"(fpcr));

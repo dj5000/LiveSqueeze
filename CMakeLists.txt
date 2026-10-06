@@ -19,9 +19,11 @@ endif()
 option(LSQ_BUILD_TESTS "Build unit tests" ON)
 option(LSQ_BUILD_CLI "Build the offline lsq-cli tool" ON)
 option(LSQ_BUILD_RUN "Build the headless lsq-run live runner" ON)
+option(LSQ_E2E_TESTS "Register the PipeWire end-to-end test (needs pipewire, wireplumber, pw-cat)" OFF)
 option(LSQ_BUILD_APP "Build the Qt tray application" OFF)
 option(LSQ_BACKEND_MINIAUDIO "Build the miniaudio backend (Windows, macOS, Linux/Pulse)" ON)
-option(LSQ_BACKEND_PIPEWIRE "Build the native PipeWire backend (Linux)" OFF)
+set(LSQ_BACKEND_PIPEWIRE "AUTO" CACHE STRING "Build the native PipeWire backend (Linux): AUTO, ON or OFF")
+set_property(CACHE LSQ_BACKEND_PIPEWIRE PROPERTY STRINGS AUTO ON OFF)
 option(LSQ_WERROR "Treat compiler warnings as errors" OFF)
 set(LSQ_SANITIZE "" CACHE STRING "Sanitizers to enable, e.g. 'address;undefined' or 'thread'")
 
@@ -29,19 +31,23 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LsqWarnings)
 include(LsqSanitizers)
 
+if(LSQ_BUILD_TESTS)
+  enable_testing()
+endif()
+
 add_subdirectory(core)
 add_subdirectory(backends)
 add_subdirectory(engine)
-
-if(LSQ_BUILD_TESTS)
-  enable_testing()
-  add_subdirectory(tests)
-endif()
 
 if(LSQ_BUILD_RUN)
   add_subdirectory(apps/run)
 endif()
 
-if(LSQ_BUILD_CLI AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cli/CMakeLists.txt")
+if(LSQ_BUILD_CLI)
   add_subdirectory(cli)
+endif()
+
+# Last, so tests can refer to the targets above.
+if(LSQ_BUILD_TESTS)
+  add_subdirectory(tests)
 endif()

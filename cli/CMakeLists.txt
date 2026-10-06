@@ -3,6 +3,7 @@ add_executable(lsq-cli
   signals.cpp
   wav_io.cpp
   analyze.cpp
+  checks.cpp
 )
 target_link_libraries(lsq-cli PRIVATE lsq::core)
 target_include_directories(lsq-cli PRIVATE "${PROJECT_SOURCE_DIR}/third_party/dr_libs")

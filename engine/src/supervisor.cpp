@@ -142,6 +142,30 @@ void Supervisor::eventTrampoline(void* user, const DeviceEvent& e) {
     static_cast<Supervisor*>(user)->postEvent(e);
 }
 
+bool Supervisor::backendHasNativeHotplug() const {
+    std::lock_guard<std::mutex> lock(engineMu_);
+    return backend_ && backend_->caps().nativeHotplugEvents;
+}
+
+void Supervisor::writeTrace() const {
+    if (tracePath_.empty() || !engine_ || engine_->traceSize() == 0) {
+        return;
+    }
+    std::FILE* f = std::fopen(tracePath_.c_str(), "w");
+    if (f == nullptr) {
+        return;
+    }
+    std::fprintf(f, "time_s,kind,frames,fill,trim_ppm,peak\n");
+    const TraceEvent* ev = engine_->traceData();
+    const std::size_t n = engine_->traceSize();
+    for (std::size_t i = 0; i < n; ++i) {
+        std::fprintf(f, "%.6f,%s,%u,%u,%.1f,%.6f\n", ev[i].time - ev[0].time,
+                     ev[i].kind == 0 ? "capture" : "playback", ev[i].frames, ev[i].fill,
+                     static_cast<double>(ev[i].trimPpm), static_cast<double>(ev[i].peak));
+    }
+    std::fclose(f);
+}
+
 void Supervisor::teardown() {
     std::lock_guard<std::mutex> lock(engineMu_);
     if (backend_) {
@@ -149,6 +173,7 @@ void Supervisor::teardown() {
         backend_->close();
         backend_.reset();
     }
+    writeTrace();
     engine_.reset();
     info_ = NegotiatedInfo{};
 }
@@ -282,7 +307,11 @@ bool Supervisor::tryStart(const SupervisorConfig& cfg) {
     ec.captureBlock = info.capturePeriodFrames;
     ec.playbackBlock = info.playbackPeriodFrames;
     ec.latency = cfg.latency;
+    ec.sharedClock = info.sharedClock;
     st = engine->configure(ec);
+    if (st.ok && !cfg.tracePath.empty()) {
+        engine->enableTrace(1u << 20);
+    }
     if (st.ok) {
         st = backend->start();
     }
@@ -297,6 +326,7 @@ bool Supervisor::tryStart(const SupervisorConfig& cfg) {
         backend_ = std::move(backend);
         engine_ = std::move(engine);
         info_ = info;
+        tracePath_ = cfg.tracePath;
     }
     setState(SupervisorState::Running, joinNames(info));
     return true;
@@ -311,6 +341,7 @@ void Supervisor::workerMain() {
     auto lastProgress = Clock::now();
     std::uint64_t lastCallbacks = 0;
     auto lastDevicePoll = Clock::now();
+    bool nativeEvents = false;
     std::vector<DeviceInfo> lastCaptures;
     std::vector<DeviceInfo> lastPlaybacks;
 
@@ -341,11 +372,31 @@ void Supervisor::workerMain() {
                 // Force an immediate (re)start below.
                 state_ = SupervisorState::Recovering;
             }
-            // A device event starts (or extends) the debounce timer.
-            if (!events_.empty() && state_ == SupervisorState::Running) {
+            // Some events start (or extend) the debounce timer. Others are noise: a "device list
+            // changed" fires whenever anything appears, including our own virtual sink, and the
+            // periodic list comparison below catches real changes to the devices we care about.
+            // A change of the system default output only matters if we were asked to follow it.
+            if (state_ == SupervisorState::Running) {
+                bool relevant = false;
+                for (const DeviceEvent& e : events_) {
+                    switch (e.kind) {
+                    case DeviceEventKind::Stopped:
+                    case DeviceEventKind::Removed:
+                    case DeviceEventKind::FormatChanged:
+                        relevant = true;
+                        break;
+                    case DeviceEventKind::DefaultChanged:
+                        relevant = relevant || cfg.request.playbackId.empty();
+                        break;
+                    case DeviceEventKind::ListChanged:
+                        break;
+                    }
+                }
                 events_.clear();
-                reactAt = Clock::now() + std::chrono::milliseconds(cfg.debounceMs);
-            } else if (!events_.empty()) {
+                if (relevant) {
+                    reactAt = Clock::now() + std::chrono::milliseconds(cfg.debounceMs);
+                }
+            } else {
                 events_.clear();
             }
         }
@@ -361,8 +412,14 @@ void Supervisor::workerMain() {
                 attempt = 0;
                 lastProgress = Clock::now();
                 lastCallbacks = 0;
-                lastCaptures = listDevices(Dir::Capture);
-                lastPlaybacks = listDevices(Dir::Playback);
+                // Backends that push hot-plug events (PipeWire) are not polled: every poll would
+                // open another connection to the audio server, which is wasted work and a source
+                // of scheduling noise next to the audio threads.
+                nativeEvents = backendHasNativeHotplug();
+                if (!nativeEvents) {
+                    lastCaptures = listDevices(Dir::Capture);
+                    lastPlaybacks = listDevices(Dir::Playback);
+                }
                 lastDevicePoll = Clock::now();
             } else if (state() == SupervisorState::Failed) {
                 wantRunning = false; // wait for the user to change the settings
@@ -401,7 +458,7 @@ void Supervisor::workerMain() {
 
         // Hot-plug: compare the device lists, and react only if one of ours is gone or a new
         // device appeared that we might prefer.
-        if (!restart && cfg.devicePollMs > 0 &&
+        if (!restart && !nativeEvents && cfg.devicePollMs > 0 &&
             now - lastDevicePoll > std::chrono::milliseconds(cfg.devicePollMs)) {
             lastDevicePoll = now;
             const auto caps = listDevices(Dir::Capture);

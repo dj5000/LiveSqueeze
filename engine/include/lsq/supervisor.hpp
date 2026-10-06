@@ -31,6 +31,9 @@ struct SupervisorConfig {
     // Which speakers the first channels of the input carry, for virtual cables that cannot say
     // (BlackHole 16ch with 5.1 in the first six channels). n == 0 uses what the device reports.
     ChannelMap captureLayout{};
+    // If not empty, the timing of every audio callback is written to this CSV file when audio
+    // stops (time, kind, frames, fill, trim), for diagnosing glitches.
+    std::string tracePath;
 
     int backoffMinMs = 250; // first retry delay; doubles up to backoffMaxMs
     int backoffMaxMs = 5000;
@@ -76,6 +79,8 @@ private:
     void workerMain();
     bool tryStart(const SupervisorConfig& cfg);
     void teardown();
+    void writeTrace() const; // engineMu_ must be held
+    bool backendHasNativeHotplug() const;
     void setState(SupervisorState s, std::string status, std::string error = {});
     void postEvent(const DeviceEvent& e);
     static void eventTrampoline(void* user, const DeviceEvent& e);
@@ -101,6 +106,7 @@ private:
     std::unique_ptr<IAudioBackend> backend_;
     std::unique_ptr<Engine> engine_;
     NegotiatedInfo info_;
+    std::string tracePath_;
 
     std::atomic<std::uint64_t> restarts_{0};
 };

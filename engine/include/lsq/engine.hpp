@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -28,6 +30,8 @@ struct EngineConfig {
     std::uint32_t captureBlock = 480;  // typical capture callback size (frames), a hint
     std::uint32_t playbackBlock = 480; // typical playback callback size (frames), a hint
     LatencyMode latency = LatencyMode::Balanced;
+    // Both devices run off one clock and their callbacks belong to the same cycle (PipeWire).
+    bool sharedClock = false;
     std::size_t maxPlaybackBlock = 8192; // larger callbacks are split
 };
 
@@ -46,6 +50,16 @@ struct EngineStats {
     double trimPpm = 0.0;   // current clock-drift correction
     double latencyMs = 0.0; // delay added by LiveSqueeze itself (excluding device buffers)
     bool running = false;   // false while waiting for the queue to fill
+};
+
+// One entry of the optional callback trace (see Engine::enableTrace).
+struct TraceEvent {
+    double time = 0.0;        // seconds on the engine's clock
+    std::uint32_t frames = 0; // size of the callback
+    std::uint32_t fill = 0;   // frames in the ring when the callback started
+    float trimPpm = 0.0f;     // drift correction (playback only)
+    float peak = 0.0f;        // largest absolute sample in the block (linear)
+    std::uint8_t kind = 0;    // 0 capture, 1 playback
 };
 
 // The realtime heart: audio from the capture callback goes through a ring, a downmix, a
@@ -73,6 +87,13 @@ public:
 
     EngineStats stats() const noexcept;
     bool popMeter(MeterFrame& out) noexcept { return chain_.popMeter(out); }
+
+    // Records the timing of the next `capacity` callbacks, for diagnosing glitches on a device. It
+    // costs one relaxed atomic increment per callback and no allocation while recording. Call
+    // before the devices start; read the result only after they have stopped.
+    void enableTrace(std::size_t capacity);
+    std::size_t traceSize() const noexcept;
+    const TraceEvent* traceData() const noexcept { return trace_.data(); }
 
     // Frames of delay the engine intends to hold, in capture-rate frames. It grows if the devices
     // turn out to use larger callbacks than they advertised.
@@ -108,6 +129,34 @@ private:
     AsyncResampler resampler_;
     DriftController drift_;
     DynamicsChain chain_;
+
+    // Records one event and returns its slot (or SIZE_MAX if tracing is off or the trace is full).
+    std::size_t trace(std::uint8_t kind, std::uint32_t frames, std::size_t fill,
+                      double trimPpm) noexcept {
+        if (trace_.empty()) {
+            return SIZE_MAX;
+        }
+        const std::size_t i = traceNext_.fetch_add(1, std::memory_order_relaxed);
+        if (i >= trace_.size()) {
+            return SIZE_MAX;
+        }
+        trace_[i] =
+            TraceEvent{now(), frames, static_cast<std::uint32_t>(fill), static_cast<float>(trimPpm),
+                       0.0f,  kind};
+        return i;
+    }
+    void tracePeak(std::size_t slot, const float* samples, std::size_t count) noexcept {
+        if (slot != SIZE_MAX) {
+            float peak = 0.0f;
+            for (std::size_t i = 0; i < count; ++i) {
+                peak = std::max(peak, std::fabs(samples[i]));
+            }
+            trace_[slot].peak = peak;
+        }
+    }
+
+    std::vector<TraceEvent> trace_;
+    std::atomic<std::size_t> traceNext_{0};
 
     std::vector<float> inN_;      // N-channel input read from the ring
     std::vector<float> stereoIn_; // after downmix

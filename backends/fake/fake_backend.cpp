@@ -73,12 +73,14 @@ Status FakeBackend::open(const OpenRequest&, const AudioCallbacks& callbacks, Ev
 }
 
 Status FakeBackend::start() {
+    std::lock_guard<std::mutex> lifecycle(lifecycleMu_);
     if (!opened_) {
         return Status::error("fake backend: not open");
     }
-    if (threadRun_.exchange(true)) {
+    if (thread_.joinable()) {
         return Status::success();
     }
+    threadRun_.store(true);
     thread_ = std::thread([this] {
         using clock = std::chrono::steady_clock;
         const auto t0 = clock::now();
@@ -96,8 +98,12 @@ Status FakeBackend::start() {
     return Status::success();
 }
 
+// Idempotent and synchronous: every caller returns only once the thread has been joined, so the
+// object can be destroyed safely afterwards no matter which thread stopped it first.
 void FakeBackend::stop() {
-    if (threadRun_.exchange(false) && thread_.joinable()) {
+    std::lock_guard<std::mutex> lifecycle(lifecycleMu_);
+    threadRun_.store(false);
+    if (thread_.joinable()) {
         thread_.join();
     }
 }
@@ -114,6 +120,7 @@ NegotiatedInfo FakeBackend::info() const {
     n.captureMap = cfg_.captureMap;
     n.capturePeriodFrames = cfg_.capturePeriod;
     n.playbackPeriodFrames = cfg_.playbackPeriod;
+    n.sharedClock = cfg_.sharedCycle;
     n.captureName = "Fake virtual cable";
     n.playbackName = "Fake speakers";
     return n;
@@ -129,6 +136,25 @@ double FakeBackend::lateness() {
     rng_ ^= rng_ << 17;
     const double u = static_cast<double>(rng_ >> 11) / 9007199254740992.0;
     return u * cfg_.jitterMs * 1e-3;
+}
+
+// Delay between the capture and playback callbacks of one shared cycle.
+double FakeBackend::intraCycleGap() {
+    if (cfg_.intraCycleWanderMs <= 0.0) {
+        return 0.0;
+    }
+    auto uniform = [this] {
+        rng_ ^= rng_ << 13;
+        rng_ ^= rng_ >> 7;
+        rng_ ^= rng_ << 17;
+        return static_cast<double>(rng_ >> 11) / 9007199254740992.0;
+    };
+    if (now_ >= gapChangeAt_) {
+        gapBase_ = uniform() * cfg_.intraCycleWanderMs * 1e-3;
+        gapChangeAt_ = now_ + 1.0 + 2.0 * uniform(); // changes every 1 to 3 seconds
+    }
+    const double noise = (uniform() - 0.5) * 0.6e-3;
+    return std::clamp(gapBase_ + noise, 0.0, cfg_.intraCycleWanderMs * 1e-3);
 }
 
 void FakeBackend::reschedule(Stream& s) {
@@ -159,6 +185,26 @@ void FakeBackend::runPlaybackCallback() {
 
 void FakeBackend::runUntil(double target) {
     for (;;) {
+        if (cfg_.sharedCycle) {
+            // One clock, one cycle: capture first, then playback, back to back.
+            if (cap_.actual > target) {
+                break;
+            }
+            now_ = cap_.actual;
+            if (cfg_.playbackFirstAfter >= 0.0 && cap_.actual >= cfg_.playbackFirstAfter) {
+                runPlaybackCallback();
+                now_ = cap_.actual + intraCycleGap();
+                runCaptureCallback();
+            } else {
+                runCaptureCallback();
+                now_ = cap_.actual + intraCycleGap();
+                runPlaybackCallback();
+            }
+            now_ = cap_.actual;
+            reschedule(cap_);
+            play_.actual = cap_.actual;
+            continue;
+        }
         const bool capFirst = cap_.actual <= play_.actual;
         Stream& s = capFirst ? cap_ : play_;
         if (s.actual > target) {

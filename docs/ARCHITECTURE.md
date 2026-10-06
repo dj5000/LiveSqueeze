@@ -108,6 +108,63 @@ Two details matter in practice, and both were found by simulation:
 Underruns fade out over about 2 ms, then wait for the queue to refill and fade back in over 10 ms. A queue that
 overfills (a long stall on the playback side) is trimmed back to target.
 
+## The PipeWire backend
+
+On Linux LiveSqueeze creates its own virtual output. It opens two `pw_stream`s in one `node.group`: the first has
+`media.class = Audio/Sink`, which makes its node an output device named "LiveSqueeze" (5.1 or 7.1 channel layout) that
+any application can play to; the second plays the processed stereo to a real output that is chosen explicitly, so it can
+never loop back into the virtual one. PipeWire's adapters convert rate and channel layout at the edges.
+
+Because both streams run in the same graph cycle off the speakers' clock, there is no drift between them, and the engine
+runs with `sharedClock`: it regulates on the plain ring fill. Two things about that mode were found by simulation and
+then by running against a real PipeWire graph:
+
+- **No "fluid fill".** The fluid fill used for independent device clocks (above) includes the time since the last capture
+  callback. Inside a shared cycle that time is arbitrary: it wanders by up to a whole period depending on how the data
+  thread is scheduled. Used there it is pure noise, and it made the controller hunt and occasionally underrun until it
+  was switched off (`tests/engine/test_engine.cpp` reproduces trim excursions up to 1500 ppm without the fix).
+- **A dead band of one capture block.** The capture node and the playback node are not ordered against each other in the
+  graph, so which of the two callbacks runs first within a cycle depends on what else the graph is waiting for, and it
+  changes at runtime (for example when the player that feeds the sink is late once). Playback first means the fill seen
+  at the start of the playback callback is one capture block lower, with nothing wrong with the queue. A controller
+  without a dead band reacted by pinning the clock correction at its ±2000 ppm limit for several seconds. The drift
+  controller now ignores differences of up to one capture block when the clock is shared.
+
+### What a stalled graph looks like
+
+When the machine is busy (or virtualised, as in a CI runner or a cloud sandbox, where a 10 ms timer is woken up 30 to
+140 ms late a few times a minute) the PipeWire graph skips cycles. The effects seen in the end-to-end test:
+
+- the *player* (`pw-cat`) misses a cycle, the virtual sink receives no data for it, and the playback callback runs
+  without a capture callback before it. The queue loses a block. One such gap is absorbed; three within 200 ms are not,
+  and LiveSqueeze fades out, re-primes and fades in (counted as an underrun);
+- the *recorder* (`pw-record`) misses a cycle and loses a block of what it records, which shifts the recording against
+  the reference by 10.7 ms per block and can leave holes of digital silence.
+
+LiveSqueeze cannot invent audio the source did not deliver. `lsq-run --trace FILE` writes the time, size, queue fill and
+peak level of every audio callback to a CSV file when the run ends, which is how these cases were told apart: a dropout
+with a steady supply of capture callbacks is LiveSqueeze's, one after skipped capture cycles is the machine's.
+
+The backend is verified end to end by `scripts/e2e/run_pw_e2e.sh`, which needs no sound card: it starts its own PipeWire
+and WirePlumber with a null sink as the "speakers", plays test files into the LiveSqueeze sink with `pw-cat`, records
+the speakers with `pw-record`, and checks the channel layout and mapping for 5.1 and 7.1 (every input channel arrives at
+the predicted level on the predicted side), that the loudness of a film-like soundtrack matches the offline `lsq-cli`
+result, and that a soak run has no dropouts that are LiveSqueeze's. Because the measurement itself suffers from stalls
+(see above) the checks are written to tolerate them: tones take the strongest of several windows (the weakest for a
+channel that should be silent), the loudness comparison skips windows next to loud transients and also compares
+alignment-independent statistics, and dropouts after a skipped source cycle are reported but not counted.
+
+## The tray application
+
+`app/` is a Qt 6 Widgets program. Everything it shows or changes goes through `AppController`, which has no widgets and
+is tested with the simulated backend: it owns the `Settings` (an INI file), the `PresetStore` (versioned JSON, written
+atomically), the `ParamStore` and the `Supervisor`, applies presets and the *strength* macro (`strengthParams()` in the
+core), restarts audio when devices or settings change, polls the meters (30 Hz while a window is open, 2 Hz in the
+tray) and produces the diagnostics text. `MainWindow` has Simple, Advanced and Devices pages; the Advanced page is built
+from the same `ParamDesc` table as the command line and the presets, so a new parameter appears everywhere at once.
+`TrayController` owns the tray icon and menu. No Qt type is used by the audio path. See
+[ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ## Device management
 
 The supervisor owns the backend and the engine on a worker thread. It opens the devices, and restarts them with
@@ -122,8 +179,8 @@ cable, and the input may not be a "Monitor of" the output.
 | M0 | Build system, CI, scaffolding |
 | M1 | DSP core, offline CLI, unit tests |
 | M2 | Engine, supervisor, backend interface, miniaudio backend, headless runner |
-| M3 | Linux PipeWire virtual-sink backend |
-| M4 | Qt tray GUI |
+| M3 | Linux PipeWire virtual-sink backend, end-to-end test |
+| M4 | Qt tray GUI (`app/`), accessibility tests and screenshots |
 | M5 | Windows backend and documentation |
 | M6 | macOS backend and documentation |
 | M7 | Packaging and release (later) |

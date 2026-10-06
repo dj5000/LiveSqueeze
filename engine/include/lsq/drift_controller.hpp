@@ -21,9 +21,14 @@ public:
     static constexpr double kMaxTrimPpm = 2000.0; // 0.2%, about 3.5 cents: inaudible
     static constexpr double kSmoothingSeconds = 1.5;
 
-    void configure(double captureRate, double targetFrames) noexcept {
+    // `deadbandFrames`: differences from the target up to this size are not corrected. Used when
+    // both streams run in one cycle: the order in which their callbacks run can change, and the
+    // fill seen at the start of the playback callback then moves by one capture block without
+    // anything having gone wrong.
+    void configure(double captureRate, double targetFrames, double deadbandFrames = 0.0) noexcept {
         rate_ = captureRate;
         target_ = targetFrames;
+        deadband_ = std::max(deadbandFrames, 0.0);
         reset();
     }
 
@@ -39,12 +44,28 @@ public:
     // of the block (seconds). Returns the new trim in ppm.
     double update(double fillFrames, double dtSeconds) noexcept {
         smoothed_ += (fillFrames - smoothed_) * (1.0 - std::exp(-dtSeconds / kSmoothingSeconds));
-        const double errMs = (smoothed_ - target_) / rate_ * 1000.0;
+        double errFrames = smoothed_ - target_;
+        if (errFrames > deadband_) {
+            errFrames -= deadband_;
+        } else if (errFrames < -deadband_) {
+            errFrames += deadband_;
+        } else {
+            errFrames = 0.0;
+        }
+        const double errMs = errFrames / rate_ * 1000.0;
 
-        // Integrate, clamped so the integral term alone can never exceed the trim limit.
-        integral_ =
-            std::clamp(integral_ + errMs * dtSeconds, -kMaxTrimPpm / kKi, kMaxTrimPpm / kKi);
-        trim_ = std::clamp(kKp * errMs + kKi * integral_, -kMaxTrimPpm, kMaxTrimPpm);
+        // PI with conditional integration: while the output is saturated and the error would push
+        // it further into saturation, stop integrating. Otherwise the integral keeps growing and
+        // the controller stays pinned at its limit long after the error has gone.
+        const double proportional = kKp * errMs;
+        const double unclamped = proportional + kKi * integral_;
+        const bool pushingFurther =
+            (unclamped > kMaxTrimPpm && errMs > 0.0) || (unclamped < -kMaxTrimPpm && errMs < 0.0);
+        if (!pushingFurther) {
+            integral_ += errMs * dtSeconds;
+        }
+        integral_ = std::clamp(integral_, -kMaxTrimPpm / kKi, kMaxTrimPpm / kKi);
+        trim_ = std::clamp(proportional + kKi * integral_, -kMaxTrimPpm, kMaxTrimPpm);
         return trim_;
     }
 
@@ -55,6 +76,7 @@ public:
 private:
     double rate_ = 48000.0;
     double target_ = 0.0;
+    double deadband_ = 0.0;
     double smoothed_ = 0.0;
     double integral_ = 0.0;
     double trim_ = 0.0;

@@ -119,6 +119,30 @@ TEST_CASE("a large clock error is still followed") {
     CHECK(r.maxAbsErrorMs < 6.0);
 }
 
+TEST_CASE("the controller recovers promptly after a disturbance saturated it") {
+    // Knock 7 ms out of the queue (as a glitch would), then watch how long the trim stays pinned.
+    DriftController d;
+    const double rate = 48000.0;
+    const double target = 1500.0;
+    d.configure(rate, target);
+    double fill = target;
+    int pinnedPeriods = 0;
+    fill -= 0.007 * rate; // the disturbance
+    for (int i = 0; i < 94 * 30; ++i) {
+        const double trim = d.update(fill, 512.0 / rate);
+        fill += -512.0 * (trim * 1e-6); // consuming faster (trim > 0) lowers the fill
+        if (std::fabs(trim) >= DriftController::kMaxTrimPpm - 0.5) {
+            ++pinnedPeriods;
+        }
+    }
+    const double pinnedSeconds = static_cast<double>(pinnedPeriods) * 512.0 / rate;
+    std::printf("    [drift] after a 7 ms disturbance the trim was pinned for %.1f s, final error "
+                "%.2f ms\n",
+                pinnedSeconds, (fill - target) / rate * 1000.0);
+    CHECK(pinnedSeconds < 4.5);
+    CHECK_NEAR((fill - target) / rate * 1000.0, 0.0, 0.3);
+}
+
 TEST_CASE("reset clears the controller state") {
     DriftController d;
     d.configure(48000.0, 576.0);

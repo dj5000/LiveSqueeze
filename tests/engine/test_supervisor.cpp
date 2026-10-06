@@ -1,6 +1,12 @@
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <thread>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 #include "doctest.h"
 #include "fake_backend.hpp"
@@ -231,4 +237,51 @@ TEST_CASE("state changes are reported to the callback") {
     REQUIRE(seen.size() >= 2);
     CHECK(seen.front() == SupervisorState::Starting);
     CHECK(seen.back() == SupervisorState::Running);
+}
+
+TEST_CASE("the callback trace is written when audio stops") {
+#if defined(_WIN32)
+    const std::string file =
+        std::string(std::getenv("TEMP") != nullptr ? std::getenv("TEMP") : ".") +
+        "\\lsq-trace-test.csv";
+#else
+    char path[] = "/tmp/lsq-trace-XXXXXX";
+    const int fd = mkstemp(path);
+    REQUIRE(fd >= 0);
+    close(fd);
+    const std::string file = path;
+#endif
+    {
+        Factory f;
+        ParamStore store;
+        Supervisor sup(f.make(), &store);
+        SupervisorConfig c = fastConfig();
+        c.tracePath = file;
+        sup.start(c);
+        REQUIRE(waitFor([&] { return sup.stats().playbackCallbacks > 30; }));
+        sup.stop();
+    }
+    std::FILE* in = std::fopen(file.c_str(), "r");
+    REQUIRE(in != nullptr);
+    char line[256];
+    REQUIRE(std::fgets(line, sizeof line, in) != nullptr);
+    CHECK(std::string(line) == "time_s,kind,frames,fill,trim_ppm,peak\n");
+    int capture = 0;
+    int playback = 0;
+    double lastTime = -1.0;
+    bool ordered = true;
+    while (std::fgets(line, sizeof line, in) != nullptr) {
+        double t = 0.0;
+        char kind[16] = {};
+        if (std::sscanf(line, "%lf,%15[a-z]", &t, kind) == 2) {
+            (std::string(kind) == "capture" ? capture : playback) += 1;
+            ordered = ordered && t >= lastTime - 5e-3;
+            lastTime = t;
+        }
+    }
+    std::fclose(in);
+    std::remove(file.c_str());
+    CHECK(capture > 10);
+    CHECK(playback > 10);
+    CHECK(ordered);
 }

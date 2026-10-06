@@ -6,9 +6,10 @@ It takes the audio your system is playing, converts multichannel sound (for exam
 dynamic range compression so loud passages are turned down and quiet ones (whispers, distant dialogue) are lifted and
 easier to hear, then limits the peaks and plays the result on your real speakers or headphones.
 
-> **Status:** early development. The DSP, the realtime engine and a headless runner exist and are tested; the
-> virtual-device backends and the tray app are being added. Design and milestones:
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> **Status:** early development. The DSP, the realtime engine, a headless runner, the Linux (PipeWire) backend and the
+> Qt tray app exist and are tested (without real sound hardware, see below); the Windows/macOS backends are being added. Design and milestones:
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). What has and has not been verified on real hardware:
+> [docs/HARDWARE_TEST_CHECKLIST.md](docs/HARDWARE_TEST_CHECKLIST.md).
 
 ## How it works
 
@@ -27,12 +28,20 @@ apps / players ──▶ virtual audio device ──▶ LiveSqueeze ──▶ sp
 
 | Platform | Virtual device | Status |
 |---|---|---|
-| Linux | Native PipeWire virtual sink created by LiveSqueeze | planned (M3) |
+| Linux | Native PipeWire virtual sink created by LiveSqueeze | working, tested end to end on a headless PipeWire |
 | Windows | An existing virtual cable such as VB-Cable, captured through WASAPI | planned (M5) |
 | macOS | [BlackHole](https://github.com/ExistentialAudio/BlackHole) (16ch for 5.1/7.1), captured through CoreAudio | planned (M6) |
 
 A custom virtual device of our own on Windows and macOS is a later goal. It needs driver signing on Windows and an
 AudioServerPlugin on macOS, so version 1 uses existing virtual cables there.
+
+## The tray app
+
+`livesqueeze` (built from `app/` when Qt 6 is installed) is the everyday way to use it: a window with a **strength**
+slider and presets, level meters, a picture of the compression curve, an Advanced page with every setting, and a Devices
+page; and a tray icon with the switches you need while watching a film (processing on/off, bypass, preset). It is built
+to be usable with the keyboard alone, with large text and with a screen reader; see
+[docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md) for what has and has not been checked.
 
 ## Trying it
 
@@ -44,8 +53,11 @@ build/cli/lsq-cli process film.wav squeezed.wav --preset movie-night          # 
 build/cli/lsq-cli analyze squeezed.wav
 ```
 
-The headless live runner opens real devices (`lsq-run --list-devices`, then `lsq-run --input "CABLE Output"`), and
-`lsq-run --selftest --json` prints a report that is useful in bug reports.
+The headless live runner works with real devices. On Linux with PipeWire just run `lsq-run`, then choose the new
+**LiveSqueeze** output in your player or sound settings. On Windows and macOS pick the virtual cable and your speakers
+(`lsq-run --list-devices`, then `lsq-run --input "CABLE Output" --output "Speakers"`). `lsq-run --selftest --json`
+prints a report that is useful in bug reports. See [docs/PLATFORMS.md](docs/PLATFORMS.md) and
+[docs/TUNING.md](docs/TUNING.md).
 
 ## Building
 

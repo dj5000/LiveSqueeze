@@ -24,11 +24,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build ffmpeg clang
+          sudo apt-get install -y --no-install-recommends ninja-build ffmpeg clang \
+            libpipewire-0.3-dev libspa-0.2-dev qt6-base-dev qt6-qpa-plugins fonts-dejavu-core
       - name: Configure
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then export CC=clang CXX=clang++; fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLSQ_WERROR=ON
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLSQ_WERROR=ON \
+            -DLSQ_BACKEND_PIPEWIRE=ON -DLSQ_BUILD_APP=ON
       - name: Build
         run: cmake --build build
       - name: Test
@@ -46,7 +48,36 @@ jobs:
           path: |
             build/cli/lsq-cli
             build/apps/run/lsq-run
+            build/app/livesqueeze
           if-no-files-found: error
+      - name: Upload screenshots of the window (light/dark, normal/double text size)
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsq-screenshots
+          path: build/tests/app/screenshots/*.png
+          if-no-files-found: warn
+
+  linux-e2e:
+    name: Linux PipeWire end-to-end
+    runs-on: ubuntu-24.04
+    # Needs a real PipeWire stack and timing that a shared runner may not provide, so it reports
+    # but does not block.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build libpipewire-0.3-dev \
+            libspa-0.2-dev pipewire pipewire-bin wireplumber dbus-x11 python3
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLSQ_BACKEND_PIPEWIRE=ON \
+            -DLSQ_E2E_TESTS=ON
+          cmake --build build
+      - name: Run the end-to-end test (headless PipeWire, no sound card)
+        run: ctest --test-dir build -L e2e --output-on-failure
 
   sanitizers:
     name: Sanitizers (${{ matrix.name }})
@@ -57,18 +88,22 @@ jobs:
         include:
           - name: ASan + UBSan
             sanitize: "address;undefined"
+            app: "ON"
           - name: TSan
             sanitize: "thread"
+            app: "OFF"
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build
+          sudo apt-get install -y --no-install-recommends ninja-build qt6-base-dev \
+            qt6-qpa-plugins fonts-dejavu-core
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DLSQ_WERROR=ON "-DLSQ_SANITIZE=${{ matrix.sanitize }}"
+            -DLSQ_WERROR=ON -DLSQ_BACKEND_PIPEWIRE=OFF -DLSQ_BUILD_APP=${{ matrix.app }} \
+            "-DLSQ_SANITIZE=${{ matrix.sanitize }}"
       - name: Build
         run: cmake --build build
       - name: Test
@@ -117,6 +152,42 @@ jobs:
             build/cli/lsq-cli
             build/apps/run/lsq-run
           if-no-files-found: error
+
+  # The Qt application on Windows and macOS. Reports, but does not block, until it has been seen to
+  # pass there (it cannot be run on those systems from where it is developed).
+  app-windows:
+    name: Qt app (Windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.6.*"
+          cache: true
+      - name: Configure
+        run: cmake -S . -B build -DLSQ_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure -R lsq_app_tests
+
+  app-macos:
+    name: Qt app (macOS)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.6.*"
+          cache: true
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLSQ_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -R lsq_app_tests
 
   format:
     name: clang-format
