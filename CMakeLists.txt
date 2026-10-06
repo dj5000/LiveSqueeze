@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
+# One binary for Apple Silicon and Intel Macs. Must be decided before project().
+option(LSQ_UNIVERSAL "macOS: build for arm64 and x86_64" OFF)
+if(APPLE AND LSQ_UNIVERSAL AND NOT CMAKE_OSX_ARCHITECTURES)
+  set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
+endif()
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+
 project(LiveSqueeze
   VERSION 0.1.0
   DESCRIPTION "Realtime audio compressor and limiter with a virtual audio device front end"
@@ -20,7 +29,8 @@ option(LSQ_BUILD_TESTS "Build unit tests" ON)
 option(LSQ_BUILD_CLI "Build the offline lsq-cli tool" ON)
 option(LSQ_BUILD_RUN "Build the headless lsq-run live runner" ON)
 option(LSQ_E2E_TESTS "Register the PipeWire end-to-end test (needs pipewire, wireplumber, pw-cat)" OFF)
-option(LSQ_BUILD_APP "Build the Qt tray application" OFF)
+set(LSQ_BUILD_APP "AUTO" CACHE STRING "Build the Qt tray application: AUTO (if Qt 6 is found), ON or OFF")
+set_property(CACHE LSQ_BUILD_APP PROPERTY STRINGS AUTO ON OFF)
 option(LSQ_BACKEND_MINIAUDIO "Build the miniaudio backend (Windows, macOS, Linux/Pulse)" ON)
 set(LSQ_BACKEND_PIPEWIRE "AUTO" CACHE STRING "Build the native PipeWire backend (Linux): AUTO, ON or OFF")
 set_property(CACHE LSQ_BACKEND_PIPEWIRE PROPERTY STRINGS AUTO ON OFF)
@@ -45,6 +55,10 @@ endif()
 
 if(LSQ_BUILD_CLI)
   add_subdirectory(cli)
+endif()
+
+if(NOT LSQ_BUILD_APP STREQUAL "OFF")
+  add_subdirectory(app)
 endif()
 
 # Last, so tests can refer to the targets above.

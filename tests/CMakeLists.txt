@@ -4,6 +4,9 @@ target_include_directories(lsq_doctest SYSTEM INTERFACE "${PROJECT_SOURCE_DIR}/t
 add_subdirectory(core)
 add_subdirectory(engine)
 add_subdirectory(backend)
+if(TARGET lsq_app_lib)
+  add_subdirectory(app)
+endif()
 
 # End-to-end test of the PipeWire backend on a headless PipeWire. Opt-in because it needs the
 # PipeWire tools and takes about a minute. Run with: ctest -L e2e
