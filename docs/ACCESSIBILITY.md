@@ -10,9 +10,10 @@ window does for them, and, as important, what has and has not been checked.
 
 | Keys | Does |
 |---|---|
-| Alt+B | Bypass on/off (plays the plain stereo downmix, for comparison) |
-| Alt+P | Processing on/off (starts or stops LiveSqueeze) |
-| Alt+S, Alt+A, Alt+D | Simple, Advanced and Devices pages |
+| Ctrl+B (Command+B on a Mac) | Bypass on/off (plays the plain stereo downmix, for comparison) |
+| Ctrl+P | Processing on/off (starts or stops LiveSqueeze) |
+| Ctrl+1, Ctrl+2, Ctrl+3 | Simple, Advanced and Devices pages |
+| Alt+B, Alt+P, Alt+S, Alt+A, Alt+D | The same, through the underlined letters (Windows and Linux only; macOS has no Alt mnemonics) |
 | Left / Right, Page Up / Page Down, Home / End | Move a slider by one step, ten steps, to either end |
 | Type a number, Enter | Set a value exactly (every slider has a number box) |
 
@@ -54,7 +55,7 @@ every platform in CI:
 - every interactive control on every page has a non-empty accessible name (as Qt's accessibility
   tree reports it) and every parameter row has a description;
 - the Tab chain is closed, reaches every control on each page and visits them top to bottom;
-- Alt+B, the page shortcuts, arrow and Page keys and typing into a number box all work;
+- the Ctrl shortcuts, the Alt mnemonics (not on macOS), arrow and Page keys and typing into a number box all work;
 - the meters do not change their accessible description between announcements;
 - the window is drawn at normal and at **double** text size, in a light and a dark palette, on all
   three pages, saved as pictures (`build/tests/app/screenshots/`) and checked for text that is cut

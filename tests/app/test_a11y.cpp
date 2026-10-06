@@ -178,13 +178,38 @@ TEST_CASE("accessibility: the main controls work from the keyboard") {
     w.activateWindow();
     CHECK(QTest::qWaitForWindowActive(&w));
 
-    // Alt+B toggles bypass. (A button reacts to its mnemonic with a short animated click, so the
-    // event loop has to run for a moment.)
+    // Ctrl+B (Command+B on a Mac) toggles bypass, Ctrl+P processing, Ctrl+1/2/3 the pages.
     CHECK_FALSE(c.bypass());
+    QTest::keyClick(&w, Qt::Key_B, Qt::ControlModifier);
+    CHECK(c.bypass());
+    QTest::keyClick(&w, Qt::Key_B, Qt::ControlModifier);
+    CHECK_FALSE(c.bypass());
+    QTest::keyClick(&w, Qt::Key_2, Qt::ControlModifier);
+    CHECK(w.tabs()->currentIndex() == 1);
+    QTest::keyClick(&w, Qt::Key_3, Qt::ControlModifier);
+    CHECK(w.tabs()->currentIndex() == 2);
+    QTest::keyClick(&w, Qt::Key_1, Qt::ControlModifier);
+    CHECK(w.tabs()->currentIndex() == 0);
+    CHECK(c.processingEnabled());
+    QTest::keyClick(&w, Qt::Key_P, Qt::ControlModifier);
+    CHECK_FALSE(c.processingEnabled());
+    QTest::keyClick(&w, Qt::Key_P, Qt::ControlModifier);
+    CHECK(c.processingEnabled());
+
+#if !defined(Q_OS_MACOS)
+    // The underlined letters (Alt+B and so on) exist on Windows and Linux. A button reacts to its
+    // mnemonic with a short animated click, so the event loop has to run for a moment.
     QTest::keyClick(&w, Qt::Key_B, Qt::AltModifier);
     CHECK(lsqtest::waitFor([&] { return c.bypass(); }, 1000));
     QTest::keyClick(&w, Qt::Key_B, Qt::AltModifier);
     CHECK(lsqtest::waitFor([&] { return !c.bypass(); }, 1000));
+    QTest::keyClick(&w, Qt::Key_A, Qt::AltModifier);
+    CHECK(w.tabs()->currentIndex() == 1);
+    QTest::keyClick(&w, Qt::Key_D, Qt::AltModifier);
+    CHECK(w.tabs()->currentIndex() == 2);
+    QTest::keyClick(&w, Qt::Key_S, Qt::AltModifier);
+    CHECK(w.tabs()->currentIndex() == 0);
+#endif
 
     // Arrow keys move the strength slider; Page keys take larger steps.
     w.tabs()->setCurrentIndex(0);
@@ -195,14 +220,6 @@ TEST_CASE("accessibility: the main controls work from the keyboard") {
     QTest::keyClick(w.strengthSlider(), Qt::Key_PageUp);
     CHECK(w.strengthSlider()->value() == before + 11);
     CHECK(c.strength() == before + 11);
-
-    // Alt+A, Alt+D and Alt+S pick the pages.
-    QTest::keyClick(&w, Qt::Key_A, Qt::AltModifier);
-    CHECK(w.tabs()->currentIndex() == 1);
-    QTest::keyClick(&w, Qt::Key_D, Qt::AltModifier);
-    CHECK(w.tabs()->currentIndex() == 2);
-    QTest::keyClick(&w, Qt::Key_S, Qt::AltModifier);
-    CHECK(w.tabs()->currentIndex() == 0);
 
     // Number boxes accept typing.
     ParamRow* trim = w.row(QStringLiteral("out_trim_db"));

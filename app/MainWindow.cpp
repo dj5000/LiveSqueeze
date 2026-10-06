@@ -13,7 +13,9 @@
 #include <QPlainTextEdit>
 #include <QScreen>
 #include <QScrollArea>
+#include <QShortcut>
 #include <QVBoxLayout>
+#include <functional>
 
 #include "Autostart.hpp"
 #include "Icons.hpp"
@@ -127,6 +129,19 @@ MainWindow::MainWindow(AppController* controller, QWidget* parent)
         updating_ = false;
         updateStatus(lastState_, lastText_);
     });
+
+    // Shortcuts that work on every platform. (Alt+letter mnemonics, shown as underlined letters,
+    // exist on Windows and Linux only: macOS has none.) Ctrl is Command on a Mac.
+    auto shortcut = [this](const QKeySequence& keys, const std::function<void()>& action) {
+        auto* sc = new QShortcut(keys, this);
+        sc->setContext(Qt::WindowShortcut);
+        connect(sc, &QShortcut::activated, this, action);
+    };
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_B), [this] { bypass_->toggle(); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_P), [this] { processing_->toggle(); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_1), [this] { tabs_->setCurrentIndex(0); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_2), [this] { tabs_->setCurrentIndex(1); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_3), [this] { tabs_->setCurrentIndex(2); });
 
     statsTimer_.setInterval(1000);
     connect(&statsTimer_, &QTimer::timeout, this, &MainWindow::refreshStats);
