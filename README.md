@@ -9,7 +9,8 @@ easier to hear, then limits the peaks and plays the result on your real speakers
 > **Status:** early development. The DSP, the realtime engine, a headless runner, the Linux (PipeWire) backend and the
 > Qt tray app exist and are tested (without real sound hardware, see below); the Windows/macOS backends are being added. Design and milestones:
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). What has and has not been verified on real hardware:
-> [docs/HARDWARE_TEST_CHECKLIST.md](docs/HARDWARE_TEST_CHECKLIST.md).
+> [docs/HARDWARE_TEST_CHECKLIST.md](docs/HARDWARE_TEST_CHECKLIST.md). Current release candidate:
+> [docs/RELEASE_NOTES_RC1.md](docs/RELEASE_NOTES_RC1.md).
 
 ## How it works
 

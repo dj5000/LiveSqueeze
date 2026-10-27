@@ -401,3 +401,43 @@ TEST_CASE("shared clock: a stable queue is held on target") {
     CHECK(std::fabs(s.trimPpm) < 50.0);
     CHECK(s.underruns == 0);
 }
+
+TEST_CASE("a restarted engine keeps the settings that were already published") {
+    // The supervisor builds a new Engine whenever audio restarts (device change, lost device,
+    // watchdog). The store only hands out values a reader has not seen, so the new engine used to
+    // start from the defaults: here that made the output 27 dB louder than the user had set it.
+    ParamStore store;
+    Params p = presetParams(Preset::LimiterOnly);
+    p.outTrimDb = -30.0f;
+    store.publish(p);
+
+    auto runLevel = [&](Engine& e) {
+        REQUIRE(e.configure(EngineConfig{}).ok);
+        std::vector<float> in(2 * 480);
+        std::vector<float> out(2 * 480);
+        double sum = 0.0;
+        std::size_t n = 0;
+        for (std::size_t b = 0, ph = 0; b < 200; ++b) {
+            for (std::size_t i = 0; i < 480; ++i, ++ph) {
+                in[2 * i] = in[2 * i + 1] = static_cast<float>(
+                    0.1 * std::sin(2.0 * kPi * 1000.0 * static_cast<double>(ph) / 48000.0));
+            }
+            e.onCapture(in.data(), 480);
+            e.onPlayback(out.data(), 480);
+            if (b >= 100) {
+                for (float v : out) {
+                    sum += static_cast<double>(v) * static_cast<double>(v);
+                    ++n;
+                }
+            }
+        }
+        return 10.0 * std::log10(sum / static_cast<double>(n) + 1e-30);
+    };
+
+    Engine first(&store);
+    const double before = runLevel(first);
+    CHECK_NEAR(before, -23.0 - 30.0, 0.5); // -20 dBFS peak sine is -23 dB RMS, minus the trim
+
+    Engine second(&store); // nothing new was published in between
+    CHECK_NEAR(runLevel(second), before, 0.1);
+}

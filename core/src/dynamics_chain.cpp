@@ -6,6 +6,12 @@
 #include "lsq/db.hpp"
 
 namespace lsq {
+namespace {
+// Input samples are limited to +60 dBFS. Real audio, even float audio far over full scale, stays
+// well below this; anything larger is garbage (an uninitialised or corrupt buffer) and would
+// otherwise overflow the detectors.
+constexpr float kMaxInput = 1000.0f;
+} // namespace
 
 void DynamicsChain::prepare(double sampleRate, std::size_t maxBlock) {
     sampleRate_ = sampleRate;
@@ -52,6 +58,7 @@ void DynamicsChain::processChunk(float* lr, std::size_t frames, const Params& p)
         if (!std::isfinite(v)) {
             v = 0.0f;
         }
+        v = std::clamp(v, -kMaxInput, kMaxInput);
         lr[i] = v;
         inPeak = std::max(inPeak, std::fabs(v));
     }
@@ -81,7 +88,10 @@ void DynamicsChain::processChunk(float* lr, std::size_t frames, const Params& p)
         for (std::size_t c = 0; c < 2; ++c) {
             const float wet = lr[2 * f + c];
             const float dry = dryOut_[2 * f + c];
-            const float v = std::clamp((wet * (1.0f - b) + dry * b) * t, -1.0f, 1.0f);
+            float v = std::clamp((wet * (1.0f - b) + dry * b) * t, -1.0f, 1.0f);
+            if (std::isnan(v)) { // std::clamp passes NaN through
+                v = 0.0f;
+            }
             lr[2 * f + c] = v;
             outPeak = std::max(outPeak, std::fabs(v));
         }

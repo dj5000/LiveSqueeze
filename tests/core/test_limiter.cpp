@@ -272,3 +272,43 @@ TEST_CASE("output does not depend on the block size") {
         CHECK(runLimiter(in, 48000.0, p, block).out == ref.out);
     }
 }
+
+TEST_CASE("lowering the ceiling while limiting does not square off the peaks") {
+    // A loud tone is limited at 0 dBTP, then the ceiling drops to -6 dB (as the strength slider or
+    // the Late night preset do). The audio already in the delay line was given gain for the old
+    // ceiling; clamping it to the new one would flatten its peaks.
+    const double sr = 48000.0;
+    Limiter lim;
+    lim.prepare(sr);
+    Params p;
+    p.ceilingDb = 0.0f;
+    std::vector<float> x = sine(48000, 997.0, -0.5, sr);
+    lim.process(x.data(), 24000, p);
+    p.ceilingDb = -6.0f;
+    lim.process(x.data() + 2 * 24000, 24000, p);
+
+    const float newCeiling = dbToLin(-6.0f);
+    std::size_t flat = 0;
+    for (std::size_t i = 2 * 24000; i < x.size(); ++i) {
+        flat += std::fabs(x[i]) == newCeiling ? 1 : 0;
+    }
+    CHECK(flat == 0);
+    // The old ceiling holds during the hand-over and the new one from latency + 1 samples on.
+    CHECK(peakLin(x, 2 * 24000) <= 1.0);
+    const auto from = static_cast<std::size_t>(24000 + lim.latencyFrames() + 1);
+    CHECK(peakLin(x, 2 * from) <= static_cast<double>(newCeiling));
+    CHECK(truePeakDb(std::vector<float>(x.begin() + 2 * 26000, x.end())) <= -6.0 + 0.05);
+}
+
+TEST_CASE("raising the ceiling takes effect at once and does not clip") {
+    Limiter lim;
+    lim.prepare(48000.0);
+    Params p;
+    p.ceilingDb = -6.0f;
+    std::vector<float> x = sine(48000, 997.0, -0.5, 48000.0);
+    lim.process(x.data(), 24000, p);
+    p.ceilingDb = 0.0f;
+    lim.process(x.data() + 2 * 24000, 24000, p);
+    CHECK(peakLin(x) <= 1.0);
+    CHECK(peakLin(x, 2 * 40000) > static_cast<double>(dbToLin(-1.0f))); // recovered towards 0 dB
+}
