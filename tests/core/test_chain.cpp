@@ -246,3 +246,47 @@ TEST_CASE("latency is reported consistently") {
     CHECK(chain.latencyFrames() == Limiter::kInterpolatorTaps / 2 + 240 - 1);
     CHECK(chain.sampleRate() == 48000.0);
 }
+
+TEST_CASE("a garbage sample far beyond full scale cannot silence the output for good") {
+    // Huge but finite values (an uninitialised or corrupt buffer) used to overflow the
+    // compressor's detector to infinity and leave its gain NaN for the rest of the session.
+    const double sr = 48000.0;
+    const Params p;
+    const std::vector<float> ref = runChain(sine(3 * 48000, 1000.0, -20.0, sr), sr, p, 480);
+    for (float big : {3.0e38f, -3.0e38f, 1.0e21f, 1.0e6f}) {
+        INFO("spike " << big);
+        DynamicsChain chain;
+        chain.prepare(sr);
+        std::vector<float> x = sine(3 * 48000, 1000.0, -20.0, sr);
+        x[2 * 48000] = big;
+        x[2 * 48000 + 1] = big;
+        for (std::size_t f = 0; f < 3 * 48000; f += 480) {
+            chain.process(x.data() + 2 * f, 480, p);
+        }
+        CHECK(allFinite(x));
+        CHECK(peakLin(x) <= 1.0);
+        // Two seconds later the level is back to normal.
+        CHECK_NEAR(rmsDb(x, 132000, 144000), rmsDb(ref, 132000, 144000), 0.5);
+    }
+}
+
+TEST_CASE("switching from Limiter only to Late night during loud audio does not clip") {
+    // Late night lowers the ceiling from -1 to -3 dBTP. In Limiter only mode the limiter is working
+    // at the ceiling when the switch happens, and the audio already in its delay line used to be
+    // clamped flat to the new ceiling (about 3 ms of squared-off peaks).
+    const double sr = 48000.0;
+    DynamicsChain chain;
+    chain.prepare(sr);
+    std::vector<float> x = sine(2 * 48000, 997.0, -0.5, sr);
+    chain.process(x.data(), 48000, presetParams(Preset::LimiterOnly));
+    chain.process(x.data() + 2 * 48000, 48000, presetParams(Preset::LateNight));
+
+    const float lateCeiling = dbToLin(presetParams(Preset::LateNight).ceilingDb);
+    std::size_t flat = 0;
+    for (std::size_t i = 2 * 48000; i < x.size(); ++i) {
+        flat += std::fabs(x[i]) == lateCeiling ? 1 : 0;
+    }
+    CHECK(flat == 0);
+    CHECK(peakLin(x, 2 * (48000 + static_cast<std::size_t>(chain.latencyFrames()) + 1)) <=
+          static_cast<double>(lateCeiling));
+}

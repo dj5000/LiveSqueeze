@@ -50,8 +50,10 @@ CompStats Compressor::process(float* lr, std::size_t frames, const Params& p) no
         msL_ += detCoef_ * (sl * sl - msL_);
         msR_ += detCoef_ * (sr * sr - msR_);
         const double power = p.linkMax ? std::max(msL_, msR_) : 0.5 * (msL_ + msR_);
+        // In double: the power of a very large sample would overflow a float to infinity, and an
+        // infinite level would leave the gain state NaN for good.
         levelDb =
-            10.0f * std::log10(std::max(static_cast<float>(power), 1e-12f)) + kSineCalibrationDb;
+            static_cast<float>(10.0 * std::log10(std::max(power, 1e-12))) + kSineCalibrationDb;
 
         // Gain: instant target from the curve, smoothed asymmetrically.
         const double target = static_cast<double>(curve::staticGainDb(levelDb, p));

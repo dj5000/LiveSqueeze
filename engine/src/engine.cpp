@@ -83,7 +83,9 @@ Status Engine::configure(const EngineConfig& cfg) {
     runningFlag_.store(false);
     playbackBlockSeen_ = cfg_.playbackBlock;
     captureBlockSeen_.store(cfg_.captureBlock);
-    params_ = Params{};
+    // Start from the settings already published: the store only hands out values this engine has
+    // not seen, and a previous engine (before a restart) may have consumed the latest one.
+    params_ = store_ != nullptr ? store_->latest() : Params{};
     captureCallbacks_ = playbackCallbacks_ = underruns_ = overruns_ = overfillSkips_ = primes_ = 0;
     adaptations_ = 0;
     lastCaptureTime_ = 0.0;

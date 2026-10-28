@@ -40,6 +40,9 @@ void Limiter::reset() noexcept {
     envPos_ = 0;
     envSum_ = static_cast<double>(lookahead_);
     envPrev_ = 1.0f;
+    clampCeiling_ = 0.0f;
+    pendingCeiling_ = 0.0f;
+    pendingLeft_ = 0;
 }
 
 float Limiter::process(float* lr, std::size_t frames, const Params& p) noexcept {
@@ -50,6 +53,15 @@ float Limiter::process(float* lr, std::size_t frames, const Params& p) noexcept 
     const std::size_t cap = dqValue_.size();
     const std::size_t delayLen = static_cast<std::size_t>(delay_ + 1);
     const double invL = 1.0 / static_cast<double>(lookahead_);
+
+    // Raising the ceiling is safe at once; lowering it reaches the clamp after the delay line.
+    if (clampCeiling_ <= 0.0f || ceiling >= clampCeiling_) {
+        clampCeiling_ = ceiling;
+        pendingLeft_ = 0;
+    } else if (pendingLeft_ == 0 ? ceiling != clampCeiling_ : ceiling != pendingCeiling_) {
+        pendingCeiling_ = ceiling;
+        pendingLeft_ = delay_ + 1;
+    }
 
     float minGain = 1.0f;
 
@@ -95,8 +107,11 @@ float Limiter::process(float* lr, std::size_t frames, const Params& p) noexcept 
         slotPtr[1] = x1;
         audioPos_ = audioPos_ + 1 == delayLen ? 0 : audioPos_ + 1;
         const float* old = &audioDelay_[2 * audioPos_];
-        lr[2 * f] = std::clamp(old[0] * gain, -ceiling, ceiling);
-        lr[2 * f + 1] = std::clamp(old[1] * gain, -ceiling, ceiling);
+        if (pendingLeft_ > 0 && --pendingLeft_ == 0) {
+            clampCeiling_ = pendingCeiling_;
+        }
+        lr[2 * f] = std::clamp(old[0] * gain, -clampCeiling_, clampCeiling_);
+        lr[2 * f + 1] = std::clamp(old[1] * gain, -clampCeiling_, clampCeiling_);
 
         ++n_;
     }

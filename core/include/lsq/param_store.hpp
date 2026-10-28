@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <type_traits>
 
 #include "lsq/params.hpp"
@@ -42,16 +43,32 @@ private:
 
 // The parameter channel between the GUI (writer) and the audio thread (reader). publish()
 // sanitizes the values, so the audio thread can trust them.
+//
+// fetch() only reports values the reader has not seen yet, so a reader that starts later (a new
+// Engine after the audio is restarted) takes the current settings from latest() instead. The
+// writer side is serialized by a mutex; the audio thread only ever calls fetch(), which never
+// locks.
 class ParamStore {
 public:
     void publish(Params p) noexcept {
         sanitize(p);
+        std::lock_guard<std::mutex> lock(writeMu_);
+        latest_ = p;
         buffer_.publish(p);
     }
     bool fetch(Params& out) noexcept { return buffer_.fetch(out); }
 
+    // The most recently published value (defaults if nothing was published). Not for the audio
+    // thread.
+    Params latest() const {
+        std::lock_guard<std::mutex> lock(writeMu_);
+        return latest_;
+    }
+
 private:
     TripleBuffer<Params> buffer_;
+    mutable std::mutex writeMu_;
+    Params latest_{};
 };
 
 } // namespace lsq
