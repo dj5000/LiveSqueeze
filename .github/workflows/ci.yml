@@ -171,6 +171,25 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure -R lsq_app_tests
+      # A folder that runs on a Windows PC as it is: the app, the Qt DLLs and plugins, the
+      # Visual C++ runtime (app-local), the command-line tools and the testing guide.
+      - name: Package the app for testers
+        shell: pwsh
+        run: |
+          $dist = "dist\LiveSqueeze"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item build\app\Release\livesqueeze.exe, build\apps\run\Release\lsq-run.exe, build\cli\Release\lsq-cli.exe $dist
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$dist\livesqueeze.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item C:\Windows\System32\vcruntime140.dll, C:\Windows\System32\vcruntime140_1.dll, C:\Windows\System32\msvcp140.dll, C:\Windows\System32\msvcp140_1.dll, C:\Windows\System32\msvcp140_2.dll $dist
+          Copy-Item docs\WINDOWS_TESTING.md "$dist\How to test.txt"
+          Copy-Item LICENSE "$dist\LICENSE.txt"
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveSqueeze-windows-app
+          path: dist/
+          if-no-files-found: error
 
   app-macos:
     name: Qt app (macOS)

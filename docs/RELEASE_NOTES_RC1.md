@@ -54,8 +54,10 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Ready-built `lsq-run.exe` and `lsq-cli.exe` for Windows are attached to each CI run as the `lsq-tools-windows`
-artifact (Actions tab > the run for this branch > Artifacts).
+**Windows testers don't need to build anything.** Each CI run attaches **LiveSqueeze-windows-app**, a folder that
+runs as it is: the tray app (`livesqueeze.exe`) with its Qt and Visual C++ DLLs, the command-line tools and the
+step-by-step guide [WINDOWS_TESTING.md](WINDOWS_TESTING.md) (in the download as `How to test.txt`). Find it in the
+Actions tab → the run for this branch → Artifacts.
 
 Windows, headless runner (after installing [VB-Cable](https://vb-audio.com/Cable/), see
 [PLATFORMS.md](PLATFORMS.md#windows)):
@@ -71,7 +73,8 @@ Offline, with no audio devices: `lsq-cli gen --kind movie --layout 5.1 --seconds
 
 ## Windows listening checklist (about 20 minutes)
 
-Do this on the real PC with the headphones or speakers you will actually use. The complete list is in
+The easiest way is the app: follow [WINDOWS_TESTING.md](WINDOWS_TESTING.md), which needs only the mouse. The same
+checks with the command-line runner are below. The complete list is in
 [HARDWARE_TEST_CHECKLIST.md](HARDWARE_TEST_CHECKLIST.md). These are the items most relevant to this candidate:
 
 1. [ ] `lsq-run --selftest --json` reports `"pass": true`, at most 1 underrun and 0 overruns. Keep the output for bug
@@ -96,4 +99,4 @@ Fix 3 (a corrupt sample) cannot practically be triggered by hand. The synthetic 
 - Windows and macOS use an existing virtual cable (VB-Cable / BlackHole). There is no LiveSqueeze-owned virtual device
   on those platforms yet.
 - Nothing has been run on real Windows or macOS audio hardware yet (see [PLATFORMS.md](PLATFORMS.md)).
-- No installer or signed binaries. Testers build from source or use the CI artifacts.
+- No installer or signed binaries. Testers use the unzipped CI download, and Windows warns that it is unsigned.
